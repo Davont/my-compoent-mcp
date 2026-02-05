@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0",
+  "mapping": [
+    {
+      "token": "--md-color-primary",
+      "cssVar": "--md-color-primary"
+    },
+    {
+      "token": "--md-radius-sm",
+      "cssVar": "--md-radius-sm"
+    }
+  ]
+}
+

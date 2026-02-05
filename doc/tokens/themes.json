@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "themes": [
+    {
+      "name": "light",
+      "tokens": {
+        "--md-color-primary": "#1677ff"
+      }
+    },
+    {
+      "name": "dark",
+      "tokens": {
+        "--md-color-primary": "#3b82f6"
+      }
+    }
+  ]
+}
+

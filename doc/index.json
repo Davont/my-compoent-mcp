@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-02-04T00:00:00.000Z",
+  "components": [
+    {
+      "name": "Button",
+      "aliases": ["Btn"],
+      "category": "form",
+      "status": "stable",
+      "keywords": ["primary", "loading", "icon"],
+      "docPath": "components/button.md",
+      "figma": "figma://placeholder/button",
+      "tokens": ["--md-color-primary", "--md-radius-sm"],
+      "since": "0.0.0"
+    }
+  ],
+  "guidelines": [
+    {
+      "name": "overview",
+      "title": "xxx 设计规范总览",
+      "docPath": "guidelines/overview.md"
+    }
+  ]
+}
+

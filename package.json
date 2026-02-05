@@ -1,0 +1,66 @@
+{
+  "name": "@my-design/mcp",
+  "version": "0.1.0",
+  "description": "my-design MCP Server - Model Context Protocol server for my-design components and documentation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "my-design-mcp": "./dist/stdio.js",
+    "my-design-mcp-http": "./dist/http.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "import": "./dist/http.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "import": "./dist/tools/index.js"
+    },
+    "./utils/*": {
+      "types": "./dist/utils/*.d.ts",
+      "import": "./dist/utils/*.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "doc"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false,
+  "keywords": [
+    "my-design",
+    "mcp",
+    "model-context-protocol",
+    "design-system",
+    "component-library",
+    "documentation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "./node_modules/.bin/rslib build",
+    "dev": "./node_modules/.bin/rslib build --watch",
+    "start": "node dist/stdio.js",
+    "start:http": "node dist/http.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1"
+  },
+  "devDependencies": {
+    "@rslib/core": "^0.18.5",
+    "@types/node": "^24.10.4",
+    "typescript": "^5.9.3"
+  }
+}
