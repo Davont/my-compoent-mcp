@@ -49,8 +49,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "./node_modules/.bin/rslib build",
-    "dev": "./node_modules/.bin/rslib build --watch",
+    "build": "rslib build",
+    "dev": "rslib build --watch",
     "start": "node dist/stdio.js",
     "start:http": "node dist/http.js",
     "prepublishOnly": "npm run build"
