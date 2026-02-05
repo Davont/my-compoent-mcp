@@ -12,7 +12,6 @@ export default defineConfig({
       format: 'esm',
       syntax: ['node 18'],
       dts: true,
-      autoExternal: false, // 将依赖打包进产物，不需要 node_modules
       output: {
         distPath: {
           root: './dist',
@@ -29,7 +28,6 @@ export default defineConfig({
       format: 'esm',
       syntax: ['node 18'],
       dts: false,
-      autoExternal: false, // 将依赖打包进产物，不需要 node_modules
       output: {
         distPath: {
           root: './dist',
@@ -46,7 +44,6 @@ export default defineConfig({
       format: 'esm',
       syntax: ['node 18'],
       dts: false,
-      autoExternal: false, // 将依赖打包进产物，不需要 node_modules
       output: {
         distPath: {
           root: './dist',
