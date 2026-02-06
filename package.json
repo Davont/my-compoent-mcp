@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "bin": {
     "my-design-mcp": "./dist/stdio.js",
-    "my-design-mcp-http": "./dist/http.js"
+    "my-design-mcp-http": "./dist/http.js",
+    "mcp": "./dist/stdio.js"
   },
   "exports": {
     ".": {
