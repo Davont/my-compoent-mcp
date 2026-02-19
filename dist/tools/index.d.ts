@@ -10,6 +10,7 @@ import { componentDetailsTool, handleComponentDetails } from './component-detail
 import { componentExamplesTool, handleComponentExamples } from './component-examples.js';
 import { themeTokensTool, handleThemeTokens } from './theme-tokens.js';
 import { changelogQueryTool, handleChangelogQuery } from './changelog-query.js';
+import { getCodeBlockTool, handleGetCodeBlock } from './get-code-block.js';
 /**
  * 所有工具的定义
  */
@@ -18,4 +19,4 @@ export declare const tools: Tool[];
  * 工具名称到处理器的映射
  */
 export declare const toolHandlers: Record<string, (args: Record<string, unknown>) => Promise<CallToolResult>>;
-export { componentListTool, handleComponentList, componentSearchTool, handleComponentSearch, componentDetailsTool, handleComponentDetails, componentExamplesTool, handleComponentExamples, themeTokensTool, handleThemeTokens, changelogQueryTool, handleChangelogQuery, };
+export { componentListTool, handleComponentList, componentSearchTool, handleComponentSearch, componentDetailsTool, handleComponentDetails, componentExamplesTool, handleComponentExamples, themeTokensTool, handleThemeTokens, changelogQueryTool, handleChangelogQuery, getCodeBlockTool, handleGetCodeBlock, };

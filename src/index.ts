@@ -23,6 +23,8 @@ export {
   handleThemeTokens,
   changelogQueryTool,
   handleChangelogQuery,
+  getCodeBlockTool,
+  handleGetCodeBlock,
 } from './tools/index.js';
 
 // 导出 utils
@@ -37,6 +39,13 @@ export {
   searchComponents,
   parseFrontmatter,
   extractSection,
+  parseExamples,
+  extractCodeBlocks,
+  replaceCodeBlocksWithPlaceholders,
+  isLargeDocument,
+  filterProps,
+  extractDescription,
+  extractPropNames,
 } from './utils/doc-reader.js';
 
 // 导出类型
@@ -48,4 +57,5 @@ export type {
   TokenDefinition,
   TokensFile,
   ThemesFile,
+  ExampleEntry,
 } from './utils/doc-reader.js';

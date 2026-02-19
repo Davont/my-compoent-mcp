@@ -61,6 +61,42 @@ export interface ThemesFile {
         tokens: Record<string, string>;
     }>;
 }
+/** 示例条目 */
+export interface ExampleEntry {
+    name: string;
+    description: string;
+    content: string;
+}
+/**
+ * 从 Examples 章节中解析出所有示例条目
+ * 按 ### 三级标题拆分，每个子标题为一个示例
+ */
+export declare function parseExamples(examplesContent: string): ExampleEntry[];
+/**
+ * 提取文档中所有代码块
+ */
+export declare function extractCodeBlocks(content: string): string[];
+/**
+ * 将大文档中的代码块替换为编号占位符
+ * 配合 get_code_block 工具使用
+ */
+export declare function replaceCodeBlocksWithPlaceholders(content: string, componentName: string): string;
+/**
+ * 判断文档是否为大文档（超过阈值行数）
+ */
+export declare function isLargeDocument(content: string): boolean;
+/**
+ * 从 Props Markdown 表格中过滤出指定属性
+ */
+export declare function filterProps(propsContent: string, propNames: string[]): string;
+/**
+ * 从文档内容中提取组件描述（# 标题后的第一段）
+ */
+export declare function extractDescription(body: string): string;
+/**
+ * 从 Props 表格中提取所有属性名列表
+ */
+export declare function extractPropNames(propsContent: string): string[];
 /**
  * 读取 index.json 索引文件
  */

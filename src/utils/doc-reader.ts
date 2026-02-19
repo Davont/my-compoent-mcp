@@ -103,6 +103,156 @@ export interface ThemesFile {
   }>;
 }
 
+/** 示例条目 */
+export interface ExampleEntry {
+  name: string;
+  description: string;
+  content: string;
+}
+
+// ============ 上下文控量工具函数 ============
+
+/** 大文档阈值（行数） */
+const LARGE_DOC_THRESHOLD = 500;
+
+/** Markdown 代码块正则 */
+const CODE_BLOCK_REGEX = /```[\s\S]*?```/g;
+
+/**
+ * 从 Examples 章节中解析出所有示例条目
+ * 按 ### 三级标题拆分，每个子标题为一个示例
+ */
+export function parseExamples(examplesContent: string): ExampleEntry[] {
+  const examples: ExampleEntry[] = [];
+  const parts = examplesContent.split(/(?=^### )/m);
+
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed.startsWith('### ')) continue;
+
+    const titleMatch = trimmed.match(/^### (.+)/);
+    if (!titleMatch) continue;
+
+    const name = titleMatch[1].trim();
+    const body = trimmed.slice(titleMatch[0].length).trim();
+
+    // 第一行非空且非代码块的行作为描述
+    const lines = body.split('\n');
+    const description = lines.find(l => l.trim().length > 0 && !l.trim().startsWith('```'))?.trim() || '';
+
+    examples.push({
+      name,
+      description,
+      content: body,
+    });
+  }
+
+  return examples;
+}
+
+/**
+ * 提取文档中所有代码块
+ */
+export function extractCodeBlocks(content: string): string[] {
+  return content.match(CODE_BLOCK_REGEX) || [];
+}
+
+/**
+ * 将大文档中的代码块替换为编号占位符
+ * 配合 get_code_block 工具使用
+ */
+export function replaceCodeBlocksWithPlaceholders(
+  content: string,
+  componentName: string
+): string {
+  let index = 0;
+  return content.replace(CODE_BLOCK_REGEX, () => {
+    index++;
+    return `\`\`\`text\n[代码块 #${index} 已隐藏]\n使用 get_code_block 工具查看，参数: componentName="${componentName}", codeBlockIndex=${index}\n\`\`\``;
+  });
+}
+
+/**
+ * 判断文档是否为大文档（超过阈值行数）
+ */
+export function isLargeDocument(content: string): boolean {
+  return content.split('\n').length > LARGE_DOC_THRESHOLD;
+}
+
+/**
+ * 从 Props Markdown 表格中过滤出指定属性
+ */
+export function filterProps(propsContent: string, propNames: string[]): string {
+  const lines = propsContent.split('\n');
+  const result: string[] = [];
+  const lowerPropNames = propNames.map(p => p.toLowerCase());
+
+  for (const line of lines) {
+    // 保留表头和分隔行
+    if (line.match(/^\|\s*Prop\s*\|/) || line.match(/^\|[-:\s|]+\|$/)) {
+      result.push(line);
+      continue;
+    }
+
+    // 检查该行是否包含目标属性名
+    const propMatch = line.match(/^\|\s*(\w+)\s*\|/);
+    if (propMatch && lowerPropNames.includes(propMatch[1].toLowerCase())) {
+      result.push(line);
+    }
+  }
+
+  if (result.length <= 2) {
+    return `未找到指定的 Props: ${propNames.join(', ')}`;
+  }
+
+  return result.join('\n');
+}
+
+/**
+ * 从文档内容中提取组件描述（# 标题后的第一段）
+ */
+export function extractDescription(body: string): string {
+  const lines = body.split('\n');
+  const descLines: string[] = [];
+  let started = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // 跳过标题行
+    if (trimmed.startsWith('# ')) continue;
+    // 遇到 --- 或 ## 停止
+    if (trimmed === '---' || trimmed.startsWith('## ')) break;
+
+    if (trimmed.length > 0) started = true;
+    if (started) {
+      if (trimmed.length === 0 && descLines.length > 0) break;
+      descLines.push(trimmed);
+    }
+  }
+
+  return descLines.join(' ');
+}
+
+/**
+ * 从 Props 表格中提取所有属性名列表
+ */
+export function extractPropNames(propsContent: string): string[] {
+  const lines = propsContent.split('\n');
+  const names: string[] = [];
+
+  for (const line of lines) {
+    // 跳过表头和分隔行
+    if (line.match(/^\|\s*Prop\s*\|/) || line.match(/^\|[-:\s|]+\|$/)) continue;
+
+    const propMatch = line.match(/^\|\s*(\w+)\s*\|/);
+    if (propMatch) {
+      names.push(propMatch[1]);
+    }
+  }
+
+  return names;
+}
+
 // ============ 读取函数 ============
 
 /**

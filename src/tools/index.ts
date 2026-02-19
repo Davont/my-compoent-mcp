@@ -13,6 +13,7 @@ import { componentDetailsTool, handleComponentDetails } from './component-detail
 import { componentExamplesTool, handleComponentExamples } from './component-examples.js';
 import { themeTokensTool, handleThemeTokens } from './theme-tokens.js';
 import { changelogQueryTool, handleChangelogQuery } from './changelog-query.js';
+import { getCodeBlockTool, handleGetCodeBlock } from './get-code-block.js';
 
 /**
  * 所有工具的定义
@@ -24,6 +25,7 @@ export const tools: Tool[] = [
   componentExamplesTool,
   themeTokensTool,
   changelogQueryTool,
+  getCodeBlockTool,
 ];
 
 /**
@@ -39,6 +41,7 @@ export const toolHandlers: Record<
   [componentExamplesTool.name]: handleComponentExamples,
   [themeTokensTool.name]: handleThemeTokens,
   [changelogQueryTool.name]: handleChangelogQuery,
+  [getCodeBlockTool.name]: handleGetCodeBlock,
 };
 
 // 重新导出各工具
@@ -55,4 +58,6 @@ export {
   handleThemeTokens,
   changelogQueryTool,
   handleChangelogQuery,
+  getCodeBlockTool,
+  handleGetCodeBlock,
 };

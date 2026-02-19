@@ -14,6 +14,83 @@ function getDocPath() {
     for (const p of possiblePaths)if (existsSync(p)) return p;
     throw new Error(`doc/ 目录不存在，已尝试路径: ${possiblePaths.join(', ')}`);
 }
+const LARGE_DOC_THRESHOLD = 500;
+const CODE_BLOCK_REGEX = /```[\s\S]*?```/g;
+function parseExamples(examplesContent) {
+    const examples = [];
+    const parts = examplesContent.split(/(?=^### )/m);
+    for (const part of parts){
+        const trimmed = part.trim();
+        if (!trimmed.startsWith('### ')) continue;
+        const titleMatch = trimmed.match(/^### (.+)/);
+        if (!titleMatch) continue;
+        const name = titleMatch[1].trim();
+        const body = trimmed.slice(titleMatch[0].length).trim();
+        const lines = body.split('\n');
+        const description = lines.find((l)=>l.trim().length > 0 && !l.trim().startsWith('```'))?.trim() || '';
+        examples.push({
+            name,
+            description,
+            content: body
+        });
+    }
+    return examples;
+}
+function extractCodeBlocks(content) {
+    return content.match(CODE_BLOCK_REGEX) || [];
+}
+function replaceCodeBlocksWithPlaceholders(content, componentName) {
+    let index = 0;
+    return content.replace(CODE_BLOCK_REGEX, ()=>{
+        index++;
+        return `\`\`\`text\n[代码块 #${index} 已隐藏]\n使用 get_code_block 工具查看，参数: componentName="${componentName}", codeBlockIndex=${index}\n\`\`\``;
+    });
+}
+function isLargeDocument(content) {
+    return content.split('\n').length > LARGE_DOC_THRESHOLD;
+}
+function filterProps(propsContent, propNames) {
+    const lines = propsContent.split('\n');
+    const result = [];
+    const lowerPropNames = propNames.map((p)=>p.toLowerCase());
+    for (const line of lines){
+        if (line.match(/^\|\s*Prop\s*\|/) || line.match(/^\|[-:\s|]+\|$/)) {
+            result.push(line);
+            continue;
+        }
+        const propMatch = line.match(/^\|\s*(\w+)\s*\|/);
+        if (propMatch && lowerPropNames.includes(propMatch[1].toLowerCase())) result.push(line);
+    }
+    if (result.length <= 2) return `未找到指定的 Props: ${propNames.join(', ')}`;
+    return result.join('\n');
+}
+function extractDescription(body) {
+    const lines = body.split('\n');
+    const descLines = [];
+    let started = false;
+    for (const line of lines){
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('# ')) {
+            if ('---' === trimmed || trimmed.startsWith('## ')) break;
+            if (trimmed.length > 0) started = true;
+            if (started) {
+                if (0 === trimmed.length && descLines.length > 0) break;
+                descLines.push(trimmed);
+            }
+        }
+    }
+    return descLines.join(' ');
+}
+function extractPropNames(propsContent) {
+    const lines = propsContent.split('\n');
+    const names = [];
+    for (const line of lines){
+        if (line.match(/^\|\s*Prop\s*\|/) || line.match(/^\|[-:\s|]+\|$/)) continue;
+        const propMatch = line.match(/^\|\s*(\w+)\s*\|/);
+        if (propMatch) names.push(propMatch[1]);
+    }
+    return names;
+}
 function readDocIndex() {
     const docPath = getDocPath();
     const indexPath = join(docPath, 'index.json');
@@ -241,7 +318,7 @@ async function handleComponentSearch(args) {
 }
 const componentDetailsTool = {
     name: 'component_details',
-    description: '获取 my-design 组件的详细文档，包括：Props（属性）、Events（事件）、核心规则（AI 生成代码时必读的约束）、Behavior（交互行为）、When to use（适用场景）、Accessibility（无障碍要求）。这是生成代码前必须调用的工具，用于确认组件 API 和使用约束。',
+    description: '获取 my-design 组件的详细文档。支持三种用法：1) brief=true 只返回组件概述和 Props 名称列表（推荐先调用）；2) 指定 sections 获取特定章节；3) propFilter 只获取指定属性的详情。生成代码前建议先 brief 了解组件，再按需获取详细信息。',
     inputSchema: {
         type: 'object',
         properties: {
@@ -249,12 +326,23 @@ const componentDetailsTool = {
                 type: 'string',
                 description: '组件名称，如 Button、Input、Table。支持别名（如 Btn）。'
             },
+            brief: {
+                type: 'boolean',
+                description: '简要模式。设为 true 只返回组件概述 + 可用章节列表 + Props 名称列表（不含详细表格），适合初步了解组件。默认 false。'
+            },
             sections: {
                 type: 'array',
                 items: {
                     type: 'string'
                 },
                 description: '要获取的章节列表。可选值：props、events、rules（核心规则）、behavior、when-to-use、accessibility、all（全部）。默认返回 props + rules。'
+            },
+            propFilter: {
+                type: 'array',
+                items: {
+                    type: 'string'
+                },
+                description: '只返回指定的 Props 属性名。如 ["onClick", "loading"] 只返回这 2 个属性的详情。需要 sections 包含 "props"（或默认）时生效。'
             }
         },
         required: [
@@ -270,6 +358,36 @@ const SECTION_MAP = {
     'when-to-use': 'When to use',
     accessibility: 'Accessibility'
 };
+function formatBriefOutput(componentName, frontmatter, body) {
+    const lines = [];
+    lines.push(`# ${componentName} 组件概述\n`);
+    const desc = extractDescription(body);
+    if (desc) {
+        lines.push(desc);
+        lines.push('');
+    }
+    if (frontmatter) {
+        const info = [];
+        if (frontmatter.import) info.push(`引入: \`${frontmatter.import}\``);
+        if (frontmatter.status) info.push(`状态: ${frontmatter.status}`);
+        if (frontmatter.since) info.push(`首次发布: v${frontmatter.since}`);
+        if (info.length > 0) {
+            lines.push(info.join(' | '));
+            lines.push('');
+        }
+    }
+    const availableSections = [];
+    for (const [key, title] of Object.entries(SECTION_MAP))if (extractSection(body, title)) availableSections.push(key);
+    lines.push(`**可用章节**: ${availableSections.join(', ')}`);
+    const propsContent = extractSection(body, 'Props');
+    if (propsContent) {
+        const propNames = extractPropNames(propsContent);
+        if (propNames.length > 0) lines.push(`**Props 列表** (${propNames.length} 个): ${propNames.join(', ')}`);
+    }
+    lines.push('');
+    lines.push('> 提示：使用 component_details 并指定 sections 和 propFilter 获取详细信息。');
+    return lines.join('\n');
+}
 function formatComponentDetails(componentName, frontmatter, sections) {
     const lines = [];
     lines.push(`# ${componentName} 组件详情\n`);
@@ -289,7 +407,9 @@ function formatComponentDetails(componentName, frontmatter, sections) {
 }
 async function handleComponentDetails(args) {
     const componentName = args?.componentName;
+    const brief = args?.brief;
     const requestedSections = args?.sections;
+    const propFilter = args?.propFilter;
     if (!componentName) return {
         content: [
             {
@@ -315,6 +435,17 @@ async function handleComponentDetails(args) {
             };
         }
         const { frontmatter, body } = parseFrontmatter(content);
+        if (brief) {
+            const output = formatBriefOutput(componentName, frontmatter, body);
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: output
+                    }
+                ]
+            };
+        }
         let sectionsToExtract;
         sectionsToExtract = requestedSections && 0 !== requestedSections.length ? requestedSections.includes('all') ? Object.keys(SECTION_MAP) : requestedSections : [
             'props',
@@ -323,7 +454,12 @@ async function handleComponentDetails(args) {
         const sections = {};
         for (const section of sectionsToExtract){
             const sectionTitle = SECTION_MAP[section];
-            if (sectionTitle) sections[section] = extractSection(body, sectionTitle);
+            if (sectionTitle) {
+                let sectionContent = extractSection(body, sectionTitle);
+                if ('props' === section && sectionContent && propFilter && propFilter.length > 0) sectionContent = filterProps(sectionContent, propFilter);
+                if (sectionContent && isLargeDocument(content)) sectionContent = replaceCodeBlocksWithPlaceholders(sectionContent, componentName);
+                sections[section] = sectionContent;
+            }
         }
         const output = formatComponentDetails(componentName, frontmatter, sections);
         return {
@@ -349,13 +485,17 @@ async function handleComponentDetails(args) {
 }
 const componentExamplesTool = {
     name: 'component_examples',
-    description: '获取 my-design 组件的代码示例。返回可直接复制使用的示例代码，覆盖组件的常见使用场景（基础用法、加载状态、禁用状态、组合使用等）。',
+    description: '获取 my-design 组件的代码示例。不传 exampleName 时返回示例目录（名称+描述，不含代码）；传 exampleName 时返回指定示例的完整代码。建议先获取目录，再按需获取具体示例。',
     inputSchema: {
         type: 'object',
         properties: {
             componentName: {
                 type: 'string',
                 description: '组件名称，如 Button、Input、Table。支持别名。'
+            },
+            exampleName: {
+                type: 'string',
+                description: '示例名称（如"基础用法"、"加载状态"）。不传则返回示例目录列表（不含代码），根据目录决定获取哪个示例。'
             }
         },
         required: [
@@ -365,6 +505,7 @@ const componentExamplesTool = {
 };
 async function handleComponentExamples(args) {
     const componentName = args?.componentName;
+    const exampleName = args?.exampleName;
     if (!componentName) return {
         content: [
             {
@@ -389,8 +530,8 @@ async function handleComponentExamples(args) {
                 isError: true
             };
         }
-        const examples = extractSection(content, 'Examples');
-        if (!examples) return {
+        const examplesSection = extractSection(content, 'Examples');
+        if (!examplesSection) return {
             content: [
                 {
                     type: 'text',
@@ -398,7 +539,48 @@ async function handleComponentExamples(args) {
                 }
             ]
         };
-        const output = `# ${componentName} 代码示例\n\n${examples}`;
+        const examples = parseExamples(examplesSection);
+        if (0 === examples.length) return {
+            content: [
+                {
+                    type: 'text',
+                    text: `# ${componentName} 代码示例\n\n${examplesSection}`
+                }
+            ]
+        };
+        if (!exampleName) {
+            const lines = [];
+            lines.push(`# ${componentName} 代码示例目录\n`);
+            lines.push(`共 ${examples.length} 个示例：\n`);
+            examples.forEach((ex, i)=>{
+                lines.push(`${i + 1}. **${ex.name}** — ${ex.description}`);
+            });
+            lines.push('');
+            lines.push(`> 提示：使用 component_examples 并传入 exampleName（如 "${examples[0].name}"）获取具体示例代码。`);
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: lines.join('\n')
+                    }
+                ]
+            };
+        }
+        const lowerName = exampleName.toLowerCase();
+        const target = examples.find((ex)=>ex.name.toLowerCase() === lowerName || ex.name.toLowerCase().includes(lowerName));
+        if (!target) {
+            const availableNames = examples.map((ex)=>ex.name).join('、');
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `未找到示例 "${exampleName}"。\n\n可用示例：${availableNames}`
+                    }
+                ],
+                isError: true
+            };
+        }
+        const output = `# ${componentName} 示例：${target.name}\n\n${target.content}`;
         return {
             content: [
                 {
@@ -645,13 +827,112 @@ async function handleChangelogQuery(args) {
         };
     }
 }
+const getCodeBlockTool = {
+    name: 'get_code_block',
+    description: '获取组件文档中被隐藏的代码块。当组件文档较长时，代码块会被替换为编号占位符（如 [代码块 #1 已隐藏]），使用此工具按编号获取具体代码。',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            componentName: {
+                type: 'string',
+                description: '组件名称，如 Button、Input、Table。'
+            },
+            codeBlockIndex: {
+                type: 'number',
+                description: '代码块编号（从 1 开始），对应占位符中的编号。'
+            }
+        },
+        required: [
+            'componentName',
+            'codeBlockIndex'
+        ]
+    }
+};
+async function handleGetCodeBlock(args) {
+    const componentName = args?.componentName;
+    const codeBlockIndex = args?.codeBlockIndex;
+    if (!componentName) return {
+        content: [
+            {
+                type: 'text',
+                text: '请提供组件名称'
+            }
+        ],
+        isError: true
+    };
+    if (!codeBlockIndex || codeBlockIndex < 1) return {
+        content: [
+            {
+                type: 'text',
+                text: '请提供有效的代码块编号（从 1 开始）'
+            }
+        ],
+        isError: true
+    };
+    try {
+        const content = readComponentDoc(componentName);
+        if (!content) {
+            const allComponents = getComponentList();
+            const componentNames = allComponents.map((c)=>c.name).join(', ');
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `未找到组件 "${componentName}" 的文档。\n\n可用组件：${componentNames}`
+                    }
+                ],
+                isError: true
+            };
+        }
+        const codeBlocks = extractCodeBlocks(content);
+        if (0 === codeBlocks.length) return {
+            content: [
+                {
+                    type: 'text',
+                    text: `组件 "${componentName}" 文档中没有代码块。`
+                }
+            ],
+            isError: true
+        };
+        if (codeBlockIndex > codeBlocks.length) return {
+            content: [
+                {
+                    type: 'text',
+                    text: `代码块编号 ${codeBlockIndex} 超出范围。组件 "${componentName}" 共有 ${codeBlocks.length} 个代码块（编号 1-${codeBlocks.length}）。`
+                }
+            ],
+            isError: true
+        };
+        const targetBlock = codeBlocks[codeBlockIndex - 1];
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `${componentName} 代码块 #${codeBlockIndex}（共 ${codeBlocks.length} 个）:\n\n${targetBlock}`
+                }
+            ]
+        };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `获取代码块失败: ${errorMessage}`
+                }
+            ],
+            isError: true
+        };
+    }
+}
 const tools = [
     componentListTool,
     componentSearchTool,
     componentDetailsTool,
     componentExamplesTool,
     themeTokensTool,
-    changelogQueryTool
+    changelogQueryTool,
+    getCodeBlockTool
 ];
 const toolHandlers = {
     [componentListTool.name]: handleComponentList,
@@ -659,7 +940,8 @@ const toolHandlers = {
     [componentDetailsTool.name]: handleComponentDetails,
     [componentExamplesTool.name]: handleComponentExamples,
     [themeTokensTool.name]: handleThemeTokens,
-    [changelogQueryTool.name]: handleChangelogQuery
+    [changelogQueryTool.name]: handleChangelogQuery,
+    [getCodeBlockTool.name]: handleGetCodeBlock
 };
 const server_filename = fileURLToPath(import.meta.url);
 const server_dirname = dirname(server_filename);
@@ -802,4 +1084,4 @@ function createMCPServer() {
     });
     return server;
 }
-export { changelogQueryTool, componentDetailsTool, componentExamplesTool, componentListTool, componentSearchTool, createMCPServer, extractSection, getComponentList, getPackageVersion, handleChangelogQuery, handleComponentDetails, handleComponentExamples, handleComponentList, handleComponentSearch, handleThemeTokens, parseFrontmatter, readChangelog, readComponentDoc, readDocIndex, readGuidelineDoc, readThemes, readTokens, searchComponents, themeTokensTool, toolHandlers, tools };
+export { changelogQueryTool, componentDetailsTool, componentExamplesTool, componentListTool, componentSearchTool, createMCPServer, extractCodeBlocks, extractDescription, extractPropNames, extractSection, filterProps, getCodeBlockTool, getComponentList, getPackageVersion, handleChangelogQuery, handleComponentDetails, handleComponentExamples, handleComponentList, handleComponentSearch, handleGetCodeBlock, handleThemeTokens, isLargeDocument, parseExamples, parseFrontmatter, readChangelog, readComponentDoc, readDocIndex, readGuidelineDoc, readThemes, readTokens, replaceCodeBlocksWithPlaceholders, searchComponents, themeTokensTool, toolHandlers, tools };
