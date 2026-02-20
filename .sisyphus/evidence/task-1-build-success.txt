@@ -1,0 +1,12 @@
+npm install exit code: 0
+npm run build exit code: 0
+dist contents: http.d.ts
+http.js
+index.d.ts
+index.js
+server.d.ts
+stdio.d.ts
+stdio.js
+tools
+utils
+oxc-parser in dependencies:     "oxc-parser": "^0.106.0"

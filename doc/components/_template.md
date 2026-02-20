@@ -1,6 +1,7 @@
 ---
 # ===== 必填 =====
 name: ComponentName        # 组件名（与 import 一致）
+import: "import { ComponentName } from '@my-design/react';"  # 引入方式
 category: form             # form / data / feedback / layout / navigation / general
 status: stable             # stable / beta / deprecated
 since: 1.0.0               # 首次发布版本
@@ -10,6 +11,7 @@ aliases: []                # 别名，用于搜索，如 [Btn, 按钮]
 keywords: []               # 关键词，用于搜索
 figma: ""                  # Figma 链接（如有）
 tokens: []                 # 相关 token，如 [--md-color-primary, --md-radius-sm]
+source: ""                 # 源码路径，如 src/components/Button/index.tsx
 ---
 
 # ComponentName
@@ -43,6 +45,19 @@ tokens: []                 # 相关 token，如 [--md-color-primary, --md-radius
 |------|------|:--------:|---------|-------------|
 | prop1 | `string` | ✅ | | 说明 |
 | prop2 | `boolean` | | `false` | 说明 |
+
+---
+
+## Events
+
+<!-- 
+⚠️ 建议有，可后补
+组件对外暴露的回调事件
+-->
+
+| Event | Type | Description |
+|-------|------|-------------|
+| onClick | `(e: MouseEvent) => void` | 说明 |
 
 ---
 

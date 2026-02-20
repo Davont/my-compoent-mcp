@@ -1,0 +1,4 @@
+PASS: Path traversal detected: ../../../etc/passwd
+PASS: Path traversal detected: ../../etc/shadow
+PASS: Path traversal detected: subdir/../../../../etc/passwd
+All path traversal tests passed

@@ -14,6 +14,9 @@ import { componentExamplesTool, handleComponentExamples } from './component-exam
 import { themeTokensTool, handleThemeTokens } from './theme-tokens.js';
 import { changelogQueryTool, handleChangelogQuery } from './changelog-query.js';
 import { getCodeBlockTool, handleGetCodeBlock } from './get-code-block.js';
+import { getComponentFileListTool, handleGetComponentFileList } from './get-component-file-list.js';
+import { getFileCodeTool, handleGetFileCode } from './get-file-code.js';
+import { getFunctionCodeTool, handleGetFunctionCode } from './get-function-code.js';
 
 /**
  * 所有工具的定义
@@ -26,6 +29,9 @@ export const tools: Tool[] = [
   themeTokensTool,
   changelogQueryTool,
   getCodeBlockTool,
+  getComponentFileListTool,
+  getFileCodeTool,
+  getFunctionCodeTool,
 ];
 
 /**
@@ -42,6 +48,9 @@ export const toolHandlers: Record<
   [themeTokensTool.name]: handleThemeTokens,
   [changelogQueryTool.name]: handleChangelogQuery,
   [getCodeBlockTool.name]: handleGetCodeBlock,
+  [getComponentFileListTool.name]: handleGetComponentFileList,
+  [getFileCodeTool.name]: handleGetFileCode,
+  [getFunctionCodeTool.name]: handleGetFunctionCode,
 };
 
 // 重新导出各工具
@@ -60,4 +69,10 @@ export {
   handleChangelogQuery,
   getCodeBlockTool,
   handleGetCodeBlock,
+  getComponentFileListTool,
+  handleGetComponentFileList,
+  getFileCodeTool,
+  handleGetFileCode,
+  getFunctionCodeTool,
+  handleGetFunctionCode,
 };

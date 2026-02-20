@@ -2,9 +2,10 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { existsSync as external_fs_existsSync, readFileSync as external_fs_readFileSync } from "fs";
+import { closeSync, existsSync as external_fs_existsSync, openSync, readFileSync as external_fs_readFileSync, readSync, readdirSync, realpathSync } from "fs";
 import { fileURLToPath } from "url";
-import { dirname, join as external_path_join } from "path";
+import { dirname, join as external_path_join, resolve, sep } from "path";
+import { parseSync } from "oxc-parser";
 const doc_reader_filename = fileURLToPath(import.meta.url);
 const doc_reader_dirname = dirname(doc_reader_filename);
 function getDocPath() {
@@ -918,6 +919,720 @@ async function handleGetCodeBlock(args) {
         };
     }
 }
+const DEFAULT_PACKAGE_NAME = '@my-design/react';
+const ENV_PACKAGE_ROOT = 'MY_DESIGN_PACKAGE_ROOT';
+const EXCLUDE_PATH_SEGMENTS = [
+    '/node_modules/',
+    '/dist/',
+    '/lib/',
+    '/es/',
+    '/cjs/',
+    '/__test__/',
+    '/__tests__/',
+    '/_story/',
+    '/_stories/',
+    '/.git/'
+];
+const EXCLUDE_TOP_LEVEL_DIRS = new Set([
+    'node_modules',
+    '.git',
+    'dist',
+    'lib',
+    'es',
+    'cjs'
+]);
+const MAX_DEPTH = 10;
+const BINARY_CHECK_BYTES = 8192;
+function shouldExcludePath(filePath) {
+    const normalized = filePath.replace(/\\/g, '/');
+    for (const segment of EXCLUDE_PATH_SEGMENTS)if (normalized.includes(segment)) return true;
+    return false;
+}
+function extractPackageName(packageRoot) {
+    const parts = packageRoot.replace(/\\/g, '/').split('/');
+    if (parts.length >= 2 && parts[parts.length - 2].startsWith('@')) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+    return parts[parts.length - 1];
+}
+function listFilesRecursive(dir, depth) {
+    if (depth > MAX_DEPTH) return [];
+    const results = [];
+    let entries;
+    try {
+        entries = readdirSync(dir, {
+            withFileTypes: true
+        });
+    } catch  {
+        return [];
+    }
+    for (const entry of entries){
+        const fullPath = external_path_join(dir, entry.name);
+        if (entry.isDirectory()) {
+            if (!shouldExcludePath(fullPath + '/')) results.push(...listFilesRecursive(fullPath, depth + 1));
+        } else if (entry.isFile()) {
+            if (!shouldExcludePath(fullPath)) results.push(fullPath);
+        }
+    }
+    return results;
+}
+function resolvePackageRoot(packageName = DEFAULT_PACKAGE_NAME) {
+    const envRoot = process.env[ENV_PACKAGE_ROOT];
+    if (envRoot && external_fs_existsSync(envRoot)) return realpathSync(envRoot);
+    const resolvedPath = external_path_join(process.cwd(), 'node_modules', packageName);
+    if (!external_fs_existsSync(resolvedPath)) throw new Error(`Package "${packageName}" not found at ${resolvedPath}. Ensure it is installed.`);
+    return realpathSync(resolvedPath);
+}
+function listComponentFiles(packageRoot, componentName) {
+    const packageName = extractPackageName(packageRoot);
+    const normalizedName = componentName.toLowerCase();
+    let entries;
+    try {
+        entries = readdirSync(packageRoot, {
+            withFileTypes: true
+        });
+    } catch  {
+        throw new Error(`包根目录不可读: ${packageRoot}`);
+    }
+    let matchedDir = null;
+    for (const entry of entries)if (entry.isDirectory() && entry.name.toLowerCase() === normalizedName) {
+        matchedDir = entry.name;
+        break;
+    }
+    if (!matchedDir) return {
+        files: [],
+        packageName
+    };
+    const componentDir = external_path_join(packageRoot, matchedDir);
+    const absoluteFiles = listFilesRecursive(componentDir, 1);
+    const files = absoluteFiles.map((absPath)=>{
+        const relativePath = absPath.slice(packageRoot.length + 1).replace(/\\/g, '/');
+        return `${packageName}/${relativePath}`;
+    });
+    return {
+        files,
+        packageName
+    };
+}
+function readSourceFile(packageRoot, relativePath) {
+    const realRoot = realpathSync(packageRoot);
+    const absPath = resolve(realRoot, relativePath);
+    if (!absPath.startsWith(realRoot + sep) && absPath !== realRoot) throw new Error(`Path traversal detected: ${relativePath}`);
+    if (!external_fs_existsSync(absPath)) throw new Error(`File not found: ${relativePath}`);
+    const fd = openSync(absPath, 'r');
+    try {
+        const buffer = Buffer.alloc(BINARY_CHECK_BYTES);
+        const bytesRead = readSync(fd, buffer, 0, BINARY_CHECK_BYTES, 0);
+        for(let i = 0; i < bytesRead; i++)if (0x00 === buffer[i]) throw new Error(`Binary file detected: ${relativePath}`);
+    } finally{
+        closeSync(fd);
+    }
+    return external_fs_readFileSync(absPath, 'utf-8');
+}
+function listTopLevelDirectories(packageRoot) {
+    let entries;
+    try {
+        entries = readdirSync(packageRoot, {
+            withFileTypes: true
+        });
+    } catch  {
+        throw new Error(`包根目录不可读: ${packageRoot}`);
+    }
+    const dirs = [];
+    for (const entry of entries)if (entry.isDirectory() && !EXCLUDE_TOP_LEVEL_DIRS.has(entry.name)) dirs.push(entry.name);
+    return dirs.sort();
+}
+const getComponentFileListTool = {
+    name: 'get_component_file_list',
+    description: `获取 my-design 组件的所有源码文件路径列表。
+
+返回组件在 @my-design/react 中的所有文件路径。
+
+路径格式示例：
+- @my-design/react/Button/index.tsx
+- @my-design/react/Button/Button.tsx
+- @my-design/react/Button/style/index.scss
+
+使用场景：
+1. 先调用此工具获取组件文件列表
+2. 再使用 get_file_code 获取感兴趣的文件代码
+3. 如需查看具体函数实现，使用 get_function_code`,
+    inputSchema: {
+        type: 'object',
+        properties: {
+            componentName: {
+                type: 'string',
+                description: '组件名称，如 Button、DatePicker、Modal 等（大小写不敏感）'
+            },
+            packageName: {
+                type: 'string',
+                description: 'npm 包名，默认为 "@my-design/react"'
+            }
+        },
+        required: [
+            'componentName'
+        ]
+    }
+};
+async function handleGetComponentFileList(args) {
+    const componentName = args?.componentName;
+    const packageName = args?.packageName;
+    if (!componentName) return {
+        content: [
+            {
+                type: 'text',
+                text: '错误：请提供组件名称 (componentName)'
+            }
+        ],
+        isError: true
+    };
+    try {
+        const packageRoot = resolvePackageRoot(packageName);
+        const { files, packageName: pkgName } = listComponentFiles(packageRoot, componentName);
+        if (0 === files.length) {
+            const availableDirs = listTopLevelDirectories(packageRoot);
+            const suggestions = availableDirs.length > 0 ? `\n\n可用的组件目录：\n${availableDirs.map((d)=>`  - ${d}`).join('\n')}` : '';
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `未找到组件 "${componentName}" 的文件。${suggestions}`
+                    }
+                ],
+                isError: true
+            };
+        }
+        const stats = {
+            ts: files.filter((f)=>f.endsWith('.ts') && !f.endsWith('.d.ts')).length,
+            tsx: files.filter((f)=>f.endsWith('.tsx')).length,
+            js: files.filter((f)=>f.endsWith('.js')).length,
+            jsx: files.filter((f)=>f.endsWith('.jsx')).length,
+            scss: files.filter((f)=>f.endsWith('.scss')).length,
+            css: files.filter((f)=>f.endsWith('.css')).length,
+            other: files.filter((f)=>!f.match(/\.(tsx?|jsx?|d\.ts|scss|css)$/)).length
+        };
+        const statsLines = [];
+        if (stats.ts > 0) statsLines.push(`  .ts:   ${stats.ts}`);
+        if (stats.tsx > 0) statsLines.push(`  .tsx:  ${stats.tsx}`);
+        if (stats.js > 0) statsLines.push(`  .js:   ${stats.js}`);
+        if (stats.jsx > 0) statsLines.push(`  .jsx:  ${stats.jsx}`);
+        if (stats.scss > 0) statsLines.push(`  .scss: ${stats.scss}`);
+        if (stats.css > 0) statsLines.push(`  .css:  ${stats.css}`);
+        if (stats.other > 0) statsLines.push(`  其他:  ${stats.other}`);
+        const output = [
+            `组件: ${componentName}`,
+            `包名: ${pkgName}`,
+            `总文件数: ${files.length}`,
+            "",
+            "文件类型统计:",
+            ...statsLines,
+            "",
+            "===== 文件列表 =====",
+            "",
+            ...files,
+            "",
+            "提示: 使用 get_file_code 工具传入上述路径获取文件代码"
+        ];
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: output.join('\n')
+                }
+            ]
+        };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `获取组件文件列表失败: ${errorMessage}`
+                }
+            ],
+            isError: true
+        };
+    }
+}
+function traverse(node, callback) {
+    if (!node) return;
+    if (Array.isArray(node)) {
+        for (const child of node)traverse(child, callback);
+        return;
+    }
+    callback(node);
+    const childKeys = [
+        'body',
+        'declarations',
+        'init',
+        'expression',
+        'left',
+        'right',
+        'properties',
+        'elements',
+        'argument',
+        'arguments',
+        'params',
+        'consequent',
+        'alternate',
+        'test',
+        'object',
+        'property',
+        'callee',
+        'value',
+        'key',
+        'computed',
+        'members',
+        'cases',
+        'discriminant',
+        'handler',
+        'block',
+        'finalizer',
+        'param',
+        'declaration',
+        'specifiers',
+        'source',
+        'exported',
+        'local',
+        'imported',
+        'superClass',
+        'decorators',
+        'typeAnnotation',
+        'returnType',
+        'typeParameters',
+        'implements',
+        'extends'
+    ];
+    for (const key of childKeys){
+        const child = node[key];
+        if (child && 'object' == typeof child) traverse(child, callback);
+    }
+}
+function extractFunctionsFromAST(ast, code) {
+    const functions = [];
+    traverse(ast, (node)=>{
+        let funcName;
+        let bodyStart;
+        let bodyEnd;
+        let funcStart;
+        let funcEnd;
+        switch(node.type){
+            case 'FunctionDeclaration':
+                if (node.id?.name && node.body && 'object' == typeof node.body && !Array.isArray(node.body)) {
+                    funcName = node.id.name;
+                    bodyStart = node.body.start;
+                    bodyEnd = node.body.end;
+                    funcStart = node.start;
+                    funcEnd = node.end;
+                }
+                break;
+            case 'FunctionExpression':
+                if (node.body && 'object' == typeof node.body && !Array.isArray(node.body)) {
+                    funcName = node.id?.name;
+                    bodyStart = node.body.start;
+                    bodyEnd = node.body.end;
+                    funcStart = node.start;
+                    funcEnd = node.end;
+                }
+                break;
+            case 'ArrowFunctionExpression':
+                if (node.body && 'object' == typeof node.body && !Array.isArray(node.body) && 'BlockStatement' === node.body.type) {
+                    bodyStart = node.body.start;
+                    bodyEnd = node.body.end;
+                    funcStart = node.start;
+                    funcEnd = node.end;
+                }
+                break;
+            case 'MethodDefinition':
+                if (node.key && node.value && 'object' == typeof node.value) {
+                    const keyNode = node.key;
+                    funcName = keyNode.name || keyNode.value;
+                    const valueNode = node.value;
+                    if (valueNode.body && 'object' == typeof valueNode.body && !Array.isArray(valueNode.body)) {
+                        bodyStart = valueNode.body.start;
+                        bodyEnd = valueNode.body.end;
+                        funcStart = node.start;
+                        funcEnd = node.end;
+                    }
+                }
+                break;
+            case 'PropertyDefinition':
+                if (node.key && node.value && 'object' == typeof node.value) {
+                    const keyNode = node.key;
+                    const valueNode = node.value;
+                    if ('ArrowFunctionExpression' === valueNode.type || 'FunctionExpression' === valueNode.type) {
+                        funcName = keyNode.name || keyNode.value;
+                        if (valueNode.body && 'object' == typeof valueNode.body && !Array.isArray(valueNode.body) && 'BlockStatement' === valueNode.body.type) {
+                            bodyStart = valueNode.body.start;
+                            bodyEnd = valueNode.body.end;
+                            funcStart = node.start;
+                            funcEnd = node.end;
+                        }
+                    }
+                }
+                break;
+            case 'Property':
+                if (node.key && node.value && 'object' == typeof node.value) {
+                    const keyNode = node.key;
+                    const valueNode = node.value;
+                    if ('FunctionExpression' === valueNode.type || 'ArrowFunctionExpression' === valueNode.type) {
+                        funcName = keyNode.name || keyNode.value;
+                        if (valueNode.body && 'object' == typeof valueNode.body && !Array.isArray(valueNode.body) && 'BlockStatement' === valueNode.body.type) {
+                            bodyStart = valueNode.body.start;
+                            bodyEnd = valueNode.body.end;
+                            funcStart = node.start;
+                            funcEnd = node.end;
+                        }
+                    }
+                }
+                break;
+        }
+        if (void 0 !== bodyStart && void 0 !== bodyEnd && void 0 !== funcStart && void 0 !== funcEnd) functions.push({
+            name: funcName || '<anonymous>',
+            bodyStart,
+            bodyEnd,
+            fullCode: code.slice(funcStart, funcEnd),
+            start: funcStart,
+            end: funcEnd
+        });
+    });
+    functions.sort((a, b)=>a.start - b.start);
+    return functions;
+}
+function extractVariableDeclarationFunctions(ast, code, existingFunctions) {
+    const existingStarts = new Set(existingFunctions.map((f)=>f.bodyStart));
+    traverse(ast, (node)=>{
+        if ('VariableDeclaration' === node.type && node.declarations) {
+            for (const decl of node.declarations)if ('VariableDeclarator' === decl.type && decl.id && decl.init) {
+                const idNode = decl.id;
+                const initNode = decl.init;
+                if (('ArrowFunctionExpression' === initNode.type || 'FunctionExpression' === initNode.type) && initNode.body && 'object' == typeof initNode.body && !Array.isArray(initNode.body) && 'BlockStatement' === initNode.body.type) {
+                    const bodyStart = initNode.body.start;
+                    for (const func of existingFunctions)if (func.bodyStart === bodyStart && '<anonymous>' === func.name) {
+                        func.name = idNode.name || '<anonymous>';
+                        break;
+                    }
+                    if (!existingStarts.has(bodyStart)) existingFunctions.push({
+                        name: idNode.name || '<anonymous>',
+                        bodyStart,
+                        bodyEnd: initNode.body.end,
+                        fullCode: code.slice(node.start, node.end),
+                        start: node.start,
+                        end: node.end
+                    });
+                }
+            }
+        }
+    });
+}
+function findAllFunctions(code, filename = 'code.tsx') {
+    try {
+        const result = parseSync(filename, code);
+        if (result.errors && result.errors.length > 0) console.warn('解析代码时有错误:', result.errors);
+        const ast = result.program;
+        const functions = extractFunctionsFromAST(ast, code);
+        extractVariableDeclarationFunctions(ast, code, functions);
+        functions.sort((a, b)=>a.start - b.start);
+        return functions;
+    } catch (error) {
+        console.error('解析代码失败:', error);
+        return [];
+    }
+}
+function removeFunctionBodies(code, filename = 'code.tsx') {
+    const functions = findAllFunctions(code, filename);
+    if (0 === functions.length) return code;
+    const sortedByBodyStart = [
+        ...functions
+    ].sort((a, b)=>b.bodyStart - a.bodyStart);
+    let result = code;
+    const replacedRanges = [];
+    for (const func of sortedByBodyStart){
+        const isNested = replacedRanges.some((range)=>func.bodyStart >= range.start && func.bodyEnd <= range.end);
+        if (isNested) continue;
+        const before = result.slice(0, func.bodyStart);
+        const after = result.slice(func.bodyEnd);
+        result = before + '{ ... }' + after;
+        replacedRanges.push({
+            start: func.bodyStart,
+            end: func.bodyEnd
+        });
+    }
+    return result;
+}
+function extractFunction(code, functionName, filename = 'code.tsx') {
+    const functions = findAllFunctions(code, filename);
+    const targetFunction = functions.find((f)=>f.name === functionName);
+    if (!targetFunction) return null;
+    return targetFunction.fullCode;
+}
+function getFunctionNames(code, filename = 'code.tsx') {
+    const functions = findAllFunctions(code, filename);
+    const names = functions.map((f)=>f.name).filter((name)=>'<anonymous>' !== name);
+    return Array.from(new Set(names));
+}
+function parseFilePath(fullPath) {
+    const match = fullPath.match(/^(@[^/]+\/[^/]+)\/(.+)$/);
+    if (!match) return null;
+    return {
+        packageName: match[1],
+        relativePath: match[2]
+    };
+}
+function isScriptFile(filePath) {
+    return /\.(tsx?|jsx?)$/.test(filePath);
+}
+const LINE_THRESHOLD = 500;
+const getFileCodeTool = {
+    name: 'get_file_code',
+    description: `获取组件文件的代码内容。
+
+输入文件路径（从 get_component_file_list 工具获取），返回文件代码。
+
+默认行为：
+- .ts/.tsx/.js/.jsx 文件且行数 >= ${LINE_THRESHOLD}：函数体被替换为 "{ ... }"，只显示代码结构
+- .ts/.tsx/.js/.jsx 文件且行数 < ${LINE_THRESHOLD}：显示完整代码
+- 其他文件（.scss 等）：显示完整内容
+
+可通过 fullCode 参数强制获取完整代码（包含函数体）。
+
+路径格式示例：
+- @my-design/react/Button/index.tsx
+- @my-design/react/Button/Button.tsx
+- @my-design/react/DatePicker/style/index.scss`,
+    inputSchema: {
+        type: 'object',
+        properties: {
+            filePath: {
+                type: 'string',
+                description: '文件完整路径，如 @my-design/react/Button/index.tsx'
+            },
+            fullCode: {
+                type: 'boolean',
+                description: '是否获取完整代码（包含函数体），默认为 false'
+            }
+        },
+        required: [
+            'filePath'
+        ]
+    }
+};
+async function handleGetFileCode(args) {
+    const filePath = args?.filePath;
+    const fullCode = args?.fullCode || false;
+    if (!filePath) return {
+        content: [
+            {
+                type: 'text',
+                text: '错误：请提供文件路径 (filePath)'
+            }
+        ],
+        isError: true
+    };
+    const parsed = parseFilePath(filePath);
+    if (!parsed) return {
+        content: [
+            {
+                type: 'text',
+                text: `错误：无效的文件路径格式。路径应为 @scope/package/path 格式。\n\n提供的路径: ${filePath}\n\n正确示例: @my-design/react/Button/index.tsx`
+            }
+        ],
+        isError: true
+    };
+    let packageRoot;
+    try {
+        packageRoot = resolvePackageRoot(parsed.packageName);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `无法找到包 "${parsed.packageName}": ${errorMessage}`
+                }
+            ],
+            isError: true
+        };
+    }
+    let content;
+    try {
+        content = readSourceFile(packageRoot, parsed.relativePath);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `读取文件失败: ${errorMessage}\n\n文件路径: ${filePath}`
+                }
+            ],
+            isError: true
+        };
+    }
+    const lineCount = content.split('\n').length;
+    let outputContent = content;
+    let processInfo = '';
+    const shouldFilterFunctionBodies = isScriptFile(filePath) && !fullCode && lineCount >= LINE_THRESHOLD;
+    if (shouldFilterFunctionBodies) {
+        outputContent = removeFunctionBodies(content, filePath);
+        processInfo = '（代码较长，函数体已替换为 "{ ... }"，可使用 fullCode=true 获取完整代码，或使用 get_function_code 工具读取具体函数实现）';
+    }
+    const output = [
+        `文件: ${filePath}`,
+        `行数: ${lineCount}`,
+        `大小: ${content.length} 字符`,
+        processInfo ? `处理: ${processInfo}` : '',
+        '',
+        '='.repeat(60),
+        '',
+        outputContent
+    ].filter(Boolean);
+    return {
+        content: [
+            {
+                type: 'text',
+                text: output.join('\n')
+            }
+        ]
+    };
+}
+function get_function_code_parseFilePath(fullPath) {
+    const match = fullPath.match(/^(@[^/]+\/[^/]+)\/(.+)$/);
+    if (!match) return null;
+    return {
+        packageName: match[1],
+        relativePath: match[2]
+    };
+}
+const getFunctionCodeTool = {
+    name: 'get_function_code',
+    description: `获取组件文件中指定函数的完整实现。
+
+输入文件路径和函数名，返回函数的完整代码（包含函数体）。
+
+支持的函数类型：
+- 普通函数声明: function foo() {}
+- 箭头函数: const foo = () => {}
+- 类方法: class Foo { bar() {} }
+- getter/setter: get foo() {} / set foo() {}
+
+路径格式示例：
+- @my-design/react/Button/index.tsx
+- @my-design/react/Table/Table.tsx`,
+    inputSchema: {
+        type: 'object',
+        properties: {
+            filePath: {
+                type: 'string',
+                description: '文件完整路径，如 @my-design/react/Table/Table.tsx'
+            },
+            functionName: {
+                type: 'string',
+                description: '函数名称，如 render、handleClick 等'
+            }
+        },
+        required: [
+            'filePath',
+            'functionName'
+        ]
+    }
+};
+async function handleGetFunctionCode(args) {
+    const filePath = args?.filePath;
+    const functionName = args?.functionName;
+    if (!filePath) return {
+        content: [
+            {
+                type: 'text',
+                text: '错误：请提供文件路径 (filePath)'
+            }
+        ],
+        isError: true
+    };
+    if (!functionName) return {
+        content: [
+            {
+                type: 'text',
+                text: '错误：请提供函数名称 (functionName)'
+            }
+        ],
+        isError: true
+    };
+    const parsed = get_function_code_parseFilePath(filePath);
+    if (!parsed) return {
+        content: [
+            {
+                type: 'text',
+                text: `错误：无效的文件路径格式。路径应为 @scope/package/path 格式。\n\n提供的路径: ${filePath}\n\n示例: @my-design/react/Button/index.tsx`
+            }
+        ],
+        isError: true
+    };
+    let packageRoot;
+    try {
+        packageRoot = resolvePackageRoot(parsed.packageName);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `解析包路径失败: ${errorMessage}`
+                }
+            ],
+            isError: true
+        };
+    }
+    let content;
+    try {
+        content = readSourceFile(packageRoot, parsed.relativePath);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `读取文件失败: ${errorMessage}\n\n文件路径: ${filePath}`
+                }
+            ],
+            isError: true
+        };
+    }
+    const functionCode = extractFunction(content, functionName, filePath);
+    if (!functionCode) {
+        const allFunctions = getFunctionNames(content, filePath);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: [
+                        `未找到函数 "${functionName}"`,
+                        '',
+                        `文件: ${filePath}`,
+                        '',
+                        `文件中可用的函数/方法 (共 ${allFunctions.length} 个):`,
+                        ...allFunctions.map((name)=>`  - ${name}`)
+                    ].join('\n')
+                }
+            ],
+            isError: true
+        };
+    }
+    const output = [
+        `文件: ${filePath}`,
+        `函数: ${functionName}`,
+        '',
+        '='.repeat(60),
+        '',
+        functionCode
+    ];
+    return {
+        content: [
+            {
+                type: 'text',
+                text: output.join('\n')
+            }
+        ]
+    };
+}
 const tools = [
     componentListTool,
     componentSearchTool,
@@ -925,7 +1640,10 @@ const tools = [
     componentExamplesTool,
     themeTokensTool,
     changelogQueryTool,
-    getCodeBlockTool
+    getCodeBlockTool,
+    getComponentFileListTool,
+    getFileCodeTool,
+    getFunctionCodeTool
 ];
 const toolHandlers = {
     [componentListTool.name]: handleComponentList,
@@ -934,7 +1652,10 @@ const toolHandlers = {
     [componentExamplesTool.name]: handleComponentExamples,
     [themeTokensTool.name]: handleThemeTokens,
     [changelogQueryTool.name]: handleChangelogQuery,
-    [getCodeBlockTool.name]: handleGetCodeBlock
+    [getCodeBlockTool.name]: handleGetCodeBlock,
+    [getComponentFileListTool.name]: handleGetComponentFileList,
+    [getFileCodeTool.name]: handleGetFileCode,
+    [getFunctionCodeTool.name]: handleGetFunctionCode
 };
 const server_filename = fileURLToPath(import.meta.url);
 const server_dirname = dirname(server_filename);

@@ -1,0 +1,6 @@
+Exit code: 0
+--- Exports ---
+export function resolvePackageRoot(packageName: string = DEFAULT_PACKAGE_NAME): string {
+export function listComponentFiles(
+export function readSourceFile(packageRoot: string, relativePath: string): string {
+export function listTopLevelDirectories(packageRoot: string): string[] {

@@ -1,0 +1,1 @@
+OK: npx tsc --noEmit src/utils/remove-function-body.ts

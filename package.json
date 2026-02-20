@@ -57,7 +57,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.1"
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "oxc-parser": "^0.106.0"
   },
   "devDependencies": {
     "@rslib/core": "^0.18.5",

@@ -25,6 +25,12 @@ export {
   handleChangelogQuery,
   getCodeBlockTool,
   handleGetCodeBlock,
+  getComponentFileListTool,
+  handleGetComponentFileList,
+  getFileCodeTool,
+  handleGetFileCode,
+  getFunctionCodeTool,
+  handleGetFunctionCode,
 } from './tools/index.js';
 
 // 导出 utils
@@ -48,6 +54,20 @@ export {
   extractPropNames,
 } from './utils/doc-reader.js';
 
+export {
+  resolvePackageRoot,
+  listComponentFiles,
+  readSourceFile,
+  listTopLevelDirectories,
+} from './utils/source-code-reader.js';
+
+export {
+  findAllFunctions,
+  removeFunctionBodies,
+  extractFunction,
+  getFunctionNames,
+} from './utils/remove-function-body.js';
+
 // 导出类型
 export type {
   ComponentIndexEntry,
@@ -59,3 +79,5 @@ export type {
   ThemesFile,
   ExampleEntry,
 } from './utils/doc-reader.js';
+
+export type { FunctionInfo } from './utils/remove-function-body.js';

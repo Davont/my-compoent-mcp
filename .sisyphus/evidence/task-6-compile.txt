@@ -1,0 +1,8 @@
+=== Task 6: get-function-code.ts type-check ===
+Date: Fri Feb 20 08:05:46 CST 2026
+
+--- npx tsc --noEmit --skipLibCheck src/tools/get-function-code.ts ---
+Exit code: 0
+
+--- LSP diagnostics: 0 errors ---
+Note: npx tsc --noEmit (without --skipLibCheck) shows only zod/v4 third-party errors, not from our file.

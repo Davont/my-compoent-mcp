@@ -11,6 +11,9 @@ import { componentExamplesTool, handleComponentExamples } from './component-exam
 import { themeTokensTool, handleThemeTokens } from './theme-tokens.js';
 import { changelogQueryTool, handleChangelogQuery } from './changelog-query.js';
 import { getCodeBlockTool, handleGetCodeBlock } from './get-code-block.js';
+import { getComponentFileListTool, handleGetComponentFileList } from './get-component-file-list.js';
+import { getFileCodeTool, handleGetFileCode } from './get-file-code.js';
+import { getFunctionCodeTool, handleGetFunctionCode } from './get-function-code.js';
 /**
  * 所有工具的定义
  */
@@ -19,4 +22,4 @@ export declare const tools: Tool[];
  * 工具名称到处理器的映射
  */
 export declare const toolHandlers: Record<string, (args: Record<string, unknown>) => Promise<CallToolResult>>;
-export { componentListTool, handleComponentList, componentSearchTool, handleComponentSearch, componentDetailsTool, handleComponentDetails, componentExamplesTool, handleComponentExamples, themeTokensTool, handleThemeTokens, changelogQueryTool, handleChangelogQuery, getCodeBlockTool, handleGetCodeBlock, };
+export { componentListTool, handleComponentList, componentSearchTool, handleComponentSearch, componentDetailsTool, handleComponentDetails, componentExamplesTool, handleComponentExamples, themeTokensTool, handleThemeTokens, changelogQueryTool, handleChangelogQuery, getCodeBlockTool, handleGetCodeBlock, getComponentFileListTool, handleGetComponentFileList, getFileCodeTool, handleGetFileCode, getFunctionCodeTool, handleGetFunctionCode, };
