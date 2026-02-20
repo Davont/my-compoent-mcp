@@ -6,7 +6,9 @@
  */
 
 import { readFileSync, existsSync, readdirSync, realpathSync, openSync, readSync, closeSync } from 'fs';
-import { join, resolve, sep } from 'path';
+import { join, resolve, sep, dirname } from 'path';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
 
 const DEFAULT_PACKAGE_NAME = '@my-design/react';
 const ENV_PACKAGE_ROOT = 'MY_DESIGN_PACKAGE_ROOT';
@@ -46,6 +48,43 @@ const COMPONENT_DIR_CANDIDATES = [
 
 const MAX_DEPTH = 10;
 const BINARY_CHECK_BYTES = 8192;
+
+const require = createRequire(import.meta.url);
+const currentModuleDir = dirname(fileURLToPath(import.meta.url));
+
+function findProjectRoot(startDir: string): string | null {
+  let cursor = startDir;
+
+  while (true) {
+    if (existsSync(join(cursor, 'package.json'))) {
+      return cursor;
+    }
+
+    const parent = dirname(cursor);
+    if (parent === cursor) {
+      return null;
+    }
+
+    cursor = parent;
+  }
+}
+
+function resolveFromNode(packageName: string): string | null {
+  const resolveBases = [process.cwd(), currentModuleDir];
+
+  for (const base of resolveBases) {
+    try {
+      const packageJsonPath = require.resolve(`${packageName}/package.json`, {
+        paths: [base],
+      });
+      return dirname(realpathSync(packageJsonPath));
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
 
 function shouldExcludePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
@@ -112,15 +151,31 @@ export function resolvePackageRoot(packageName: string = DEFAULT_PACKAGE_NAME): 
     return realpathSync(envRoot);
   }
 
-  const resolvedPath = join(process.cwd(), 'node_modules', packageName);
-
-  if (!existsSync(resolvedPath)) {
-    throw new Error(
-      `Package "${packageName}" not found at ${resolvedPath}. Ensure it is installed.`
-    );
+  const nodeResolved = resolveFromNode(packageName);
+  if (nodeResolved) {
+    return nodeResolved;
   }
 
-  return realpathSync(resolvedPath);
+  const projectRoot = findProjectRoot(currentModuleDir);
+  const fallbackCandidates = [
+    join(process.cwd(), 'node_modules', packageName),
+    ...(projectRoot
+      ? [
+          join(projectRoot, 'node_modules', packageName),
+        ]
+      : []),
+  ];
+
+  for (const candidate of fallbackCandidates) {
+    if (existsSync(candidate)) {
+      return realpathSync(candidate);
+    }
+  }
+
+  const triedPaths = fallbackCandidates.join(', ');
+  throw new Error(
+    `Package "${packageName}" not found. Tried: ${triedPaths}. Set ${ENV_PACKAGE_ROOT} to override package root.`
+  );
 }
 
 /**

@@ -5,6 +5,7 @@ import { CallToolRequestSchema, ListResourcesRequestSchema, ListToolsRequestSche
 import { closeSync, existsSync as external_fs_existsSync, openSync, readFileSync as external_fs_readFileSync, readSync, readdirSync, realpathSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join as external_path_join, resolve, sep } from "path";
+import { createRequire } from "module";
 import { parseSync } from "oxc-parser";
 const doc_reader_filename = fileURLToPath(import.meta.url);
 const doc_reader_dirname = dirname(doc_reader_filename);
@@ -949,6 +950,34 @@ const COMPONENT_DIR_CANDIDATES = [
 ];
 const MAX_DEPTH = 10;
 const BINARY_CHECK_BYTES = 8192;
+const source_code_reader_require = createRequire(import.meta.url);
+const currentModuleDir = dirname(fileURLToPath(import.meta.url));
+function findProjectRoot(startDir) {
+    let cursor = startDir;
+    while(true){
+        if (external_fs_existsSync(external_path_join(cursor, 'package.json'))) return cursor;
+        const parent = dirname(cursor);
+        if (parent === cursor) return null;
+        cursor = parent;
+    }
+}
+function resolveFromNode(packageName) {
+    const resolveBases = [
+        process.cwd(),
+        currentModuleDir
+    ];
+    for (const base of resolveBases)try {
+        const packageJsonPath = source_code_reader_require.resolve(`${packageName}/package.json`, {
+            paths: [
+                base
+            ]
+        });
+        return dirname(realpathSync(packageJsonPath));
+    } catch  {
+        continue;
+    }
+    return null;
+}
 function shouldExcludePath(filePath) {
     const normalized = filePath.replace(/\\/g, '/');
     for (const segment of EXCLUDE_PATH_SEGMENTS)if (normalized.includes(segment)) return true;
@@ -983,9 +1012,18 @@ function listFilesRecursive(dir, depth) {
 function resolvePackageRoot(packageName = DEFAULT_PACKAGE_NAME) {
     const envRoot = process.env[ENV_PACKAGE_ROOT];
     if (envRoot && external_fs_existsSync(envRoot)) return realpathSync(envRoot);
-    const resolvedPath = external_path_join(process.cwd(), 'node_modules', packageName);
-    if (!external_fs_existsSync(resolvedPath)) throw new Error(`Package "${packageName}" not found at ${resolvedPath}. Ensure it is installed.`);
-    return realpathSync(resolvedPath);
+    const nodeResolved = resolveFromNode(packageName);
+    if (nodeResolved) return nodeResolved;
+    const projectRoot = findProjectRoot(currentModuleDir);
+    const fallbackCandidates = [
+        external_path_join(process.cwd(), 'node_modules', packageName),
+        ...projectRoot ? [
+            external_path_join(projectRoot, 'node_modules', packageName)
+        ] : []
+    ];
+    for (const candidate of fallbackCandidates)if (external_fs_existsSync(candidate)) return realpathSync(candidate);
+    const triedPaths = fallbackCandidates.join(', ');
+    throw new Error(`Package "${packageName}" not found. Tried: ${triedPaths}. Set ${ENV_PACKAGE_ROOT} to override package root.`);
 }
 function listComponentFiles(packageRoot, componentName) {
     const packageName = extractPackageName(packageRoot);
