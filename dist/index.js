@@ -948,6 +948,12 @@ const EXCLUDE_TOP_LEVEL_DIRS = new Set([
     'es',
     'cjs'
 ]);
+const COMPONENT_DIR_CANDIDATES = [
+    '',
+    'components',
+    'src',
+    'src/components'
+];
 const MAX_DEPTH = 10;
 const BINARY_CHECK_BYTES = 8192;
 function shouldExcludePath(filePath) {
@@ -991,31 +997,35 @@ function resolvePackageRoot(packageName = DEFAULT_PACKAGE_NAME) {
 function listComponentFiles(packageRoot, componentName) {
     const packageName = extractPackageName(packageRoot);
     const normalizedName = componentName.toLowerCase();
-    let entries;
-    try {
-        entries = readdirSync(packageRoot, {
-            withFileTypes: true
+    for (const candidate of COMPONENT_DIR_CANDIDATES){
+        const searchDir = candidate ? join(packageRoot, candidate) : packageRoot;
+        let entries;
+        try {
+            entries = readdirSync(searchDir, {
+                withFileTypes: true
+            });
+        } catch  {
+            continue;
+        }
+        let matchedDir = null;
+        for (const entry of entries)if (entry.isDirectory() && entry.name.toLowerCase() === normalizedName) {
+            matchedDir = entry.name;
+            break;
+        }
+        if (!matchedDir) continue;
+        const componentDir = join(searchDir, matchedDir);
+        const absoluteFiles = listFilesRecursive(componentDir, 1);
+        const files = absoluteFiles.map((absPath)=>{
+            const relativePath = absPath.slice(packageRoot.length + 1).replace(/\\/g, '/');
+            return `${packageName}/${relativePath}`;
         });
-    } catch  {
-        throw new Error(`包根目录不可读: ${packageRoot}`);
+        return {
+            files,
+            packageName
+        };
     }
-    let matchedDir = null;
-    for (const entry of entries)if (entry.isDirectory() && entry.name.toLowerCase() === normalizedName) {
-        matchedDir = entry.name;
-        break;
-    }
-    if (!matchedDir) return {
-        files: [],
-        packageName
-    };
-    const componentDir = join(packageRoot, matchedDir);
-    const absoluteFiles = listFilesRecursive(componentDir, 1);
-    const files = absoluteFiles.map((absPath)=>{
-        const relativePath = absPath.slice(packageRoot.length + 1).replace(/\\/g, '/');
-        return `${packageName}/${relativePath}`;
-    });
     return {
-        files,
+        files: [],
         packageName
     };
 }
@@ -1035,6 +1045,20 @@ function readSourceFile(packageRoot, relativePath) {
     return readFileSync(absPath, 'utf-8');
 }
 function listTopLevelDirectories(packageRoot) {
+    for (const candidate of COMPONENT_DIR_CANDIDATES){
+        const searchDir = candidate ? join(packageRoot, candidate) : packageRoot;
+        let entries;
+        try {
+            entries = readdirSync(searchDir, {
+                withFileTypes: true
+            });
+        } catch  {
+            continue;
+        }
+        const dirs = [];
+        for (const entry of entries)if (entry.isDirectory() && !EXCLUDE_TOP_LEVEL_DIRS.has(entry.name)) dirs.push(entry.name);
+        if ('' !== candidate || !(dirs.length <= 3)) return dirs.sort();
+    }
     let entries;
     try {
         entries = readdirSync(packageRoot, {

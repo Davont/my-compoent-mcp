@@ -33,6 +33,17 @@ const EXCLUDE_TOP_LEVEL_DIRS = new Set([
   'cjs',
 ]);
 
+/**
+ * 组件目录的候选父路径（相对于包根目录）
+ * 按优先级排列，找到第一个匹配即停止
+ */
+const COMPONENT_DIR_CANDIDATES = [
+  '',                // 顶层: {root}/Button/
+  'components',      // {root}/components/Button/
+  'src',             // {root}/src/Button/
+  'src/components',  // {root}/src/components/Button/
+];
+
 const MAX_DEPTH = 10;
 const BINARY_CHECK_BYTES = 8192;
 
@@ -129,34 +140,38 @@ export function listComponentFiles(
   const packageName = extractPackageName(packageRoot);
   const normalizedName = componentName.toLowerCase();
 
-  let entries;
-  try {
-    entries = readdirSync(packageRoot, { withFileTypes: true });
-  } catch {
-    throw new Error(`包根目录不可读: ${packageRoot}`);
-  }
+  for (const candidate of COMPONENT_DIR_CANDIDATES) {
+    const searchDir = candidate ? join(packageRoot, candidate) : packageRoot;
 
-  let matchedDir: string | null = null;
-  for (const entry of entries) {
-    if (entry.isDirectory() && entry.name.toLowerCase() === normalizedName) {
-      matchedDir = entry.name;
-      break;
+    let entries;
+    try {
+      entries = readdirSync(searchDir, { withFileTypes: true });
+    } catch {
+      continue;
     }
+
+    let matchedDir: string | null = null;
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.toLowerCase() === normalizedName) {
+        matchedDir = entry.name;
+        break;
+      }
+    }
+
+    if (!matchedDir) continue;
+
+    const componentDir = join(searchDir, matchedDir);
+    const absoluteFiles = listFilesRecursive(componentDir, 1);
+
+    const files = absoluteFiles.map(absPath => {
+      const relativePath = absPath.slice(packageRoot.length + 1).replace(/\\/g, '/');
+      return `${packageName}/${relativePath}`;
+    });
+
+    return { files, packageName };
   }
 
-  if (!matchedDir) {
-    return { files: [], packageName };
-  }
-
-  const componentDir = join(packageRoot, matchedDir);
-  const absoluteFiles = listFilesRecursive(componentDir, 1);
-
-  const files = absoluteFiles.map(absPath => {
-    const relativePath = absPath.slice(packageRoot.length + 1).replace(/\\/g, '/');
-    return `${packageName}/${relativePath}`;
-  });
-
-  return { files, packageName };
+  return { files: [], packageName };
 }
 
 /**
@@ -208,6 +223,28 @@ export function readSourceFile(packageRoot: string, relativePath: string): strin
  * @returns 排序后的目录名数组
  */
 export function listTopLevelDirectories(packageRoot: string): string[] {
+  for (const candidate of COMPONENT_DIR_CANDIDATES) {
+    const searchDir = candidate ? join(packageRoot, candidate) : packageRoot;
+
+    let entries;
+    try {
+      entries = readdirSync(searchDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const dirs: string[] = [];
+    for (const entry of entries) {
+      if (entry.isDirectory() && !EXCLUDE_TOP_LEVEL_DIRS.has(entry.name)) {
+        dirs.push(entry.name);
+      }
+    }
+
+    if (candidate === '' && dirs.length <= 3) continue;
+
+    return dirs.sort();
+  }
+
   let entries;
   try {
     entries = readdirSync(packageRoot, { withFileTypes: true });
@@ -221,6 +258,5 @@ export function listTopLevelDirectories(packageRoot: string): string[] {
       dirs.push(entry.name);
     }
   }
-
   return dirs.sort();
 }

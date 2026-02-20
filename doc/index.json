@@ -1,17 +1,61 @@
 {
   "schemaVersion": "1.0",
-  "generatedAt": "2026-02-04T00:00:00.000Z",
+  "generatedAt": "2026-02-21T00:00:00.000Z",
   "components": [
     {
       "name": "Button",
-      "aliases": ["Btn"],
+      "aliases": ["Btn", "按钮"],
       "category": "form",
       "status": "stable",
-      "keywords": ["primary", "loading", "icon"],
+      "keywords": ["primary", "loading", "icon", "按钮", "提交"],
       "docPath": "components/button.md",
-      "figma": "figma://placeholder/button",
-      "tokens": ["--md-color-primary", "--md-radius-sm"],
-      "since": "0.0.0"
+      "figma": "figma://file/xxx/button",
+      "tokens": ["--md-color-primary", "--md-radius-sm", "--md-spacing-xs"],
+      "since": "1.0.0"
+    },
+    {
+      "name": "Input",
+      "aliases": ["输入框", "TextInput"],
+      "category": "form",
+      "status": "stable",
+      "keywords": ["输入", "文本", "表单", "text", "textarea"],
+      "docPath": "components/input.md",
+      "figma": "figma://file/xxx/input",
+      "tokens": ["--md-color-border", "--md-color-primary", "--md-radius-sm", "--md-spacing-sm"],
+      "since": "1.0.0"
+    },
+    {
+      "name": "Modal",
+      "aliases": ["Dialog", "弹窗", "对话框"],
+      "category": "feedback",
+      "status": "stable",
+      "keywords": ["确认", "弹出", "遮罩", "模态", "confirm", "dialog", "popup"],
+      "docPath": "components/modal.md",
+      "figma": "figma://file/xxx/modal",
+      "tokens": ["--md-color-mask", "--md-radius-md", "--md-spacing-lg", "--md-shadow-lg"],
+      "since": "1.2.0"
+    },
+    {
+      "name": "Select",
+      "aliases": ["下拉选择", "选择器", "Dropdown"],
+      "category": "form",
+      "status": "stable",
+      "keywords": ["选择", "下拉", "多选", "搜索", "option", "筛选", "filter"],
+      "docPath": "components/select.md",
+      "figma": "figma://file/xxx/select",
+      "tokens": ["--md-color-primary", "--md-color-border", "--md-radius-sm", "--md-spacing-sm"],
+      "since": "1.1.0"
+    },
+    {
+      "name": "Tooltip",
+      "aliases": ["提示", "气泡提示", "文字提示"],
+      "category": "display",
+      "status": "beta",
+      "keywords": ["提示", "hover", "悬浮", "气泡", "tip", "popover", "说明"],
+      "docPath": "components/tooltip.md",
+      "figma": "figma://file/xxx/tooltip",
+      "tokens": ["--md-color-tooltip-bg", "--md-color-tooltip-text", "--md-radius-sm", "--md-shadow-sm"],
+      "since": "1.3.0"
     }
   ],
   "guidelines": [
