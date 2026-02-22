@@ -2,6 +2,17 @@
 
 MCP Server for my-design 组件库，最终目标是支撑「设计稿 DSL → 高质量页面代码」的 AI 生成链路。当前阶段提供组件文档、Props、示例、源码、Design Tokens 的查询能力，让 AI 充分理解组件后生成符合规范的代码。
 
+## 项目背景与下一步计划
+
+- 本项目为 AI 设计稿转代码服务：输入 DSL（Figma 元数据清理后 + 布局信息），AI 生成使用 my-design/react 的页面代码
+- 生产环境模型是 **GLM4.5**（能力弱于 Claude），因此 MCP 工具要尽量替 AI 做决策，减少 AI 需要"思考"的部分
+- 当前 11 个工具已覆盖组件查询能力，下一步需要新增：
+  1. `resolve_dsl_to_components` — DSL 节点 → 推荐组件 + Props 映射
+  2. `get_token_mapping` — 设计值 → my-design token 映射
+  3. `validate_generated_code` — 基于组件核心规则做合规校验
+- 用户需要提供：一段真实 DSL JSON + 同页面的算法生成 HTML，用于对比确定最终方案（走 DSL / HTML / 混合）
+- 组件文档（当前 5 个）和 token（当前 2 个）后续会安排人补充，工具架构不需要改
+
 ## 技术栈
 
 - TypeScript + ESM
