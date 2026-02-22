@@ -63,6 +63,7 @@ const SECTION_MAP: Record<string, string> = {
   'behavior': 'Behavior',
   'when-to-use': 'When to use',
   'accessibility': 'Accessibility',
+  'related': 'Related',
 };
 
 /**
@@ -114,9 +115,21 @@ function formatBriefOutput(
     }
   }
   
+  // Related 关联组件
+  const relatedContent = extractSection(body, 'Related');
+  if (relatedContent) {
+    const relatedLines = relatedContent.split('\n').filter(l => l.trim().startsWith('- '));
+    if (relatedLines.length > 0) {
+      lines.push(`**关联组件**: ${relatedLines.map(l => {
+        const m = l.match(/^-\s+`([^`]+)`/);
+        return m ? m[1] : '';
+      }).filter(Boolean).join(', ')}`);
+    }
+  }
+
   lines.push('');
-  lines.push('> 提示：使用 component_details 并指定 sections 和 propFilter 获取详细信息。');
-  
+  lines.push('> 提示：使用 component_details 并指定 sections 和 propFilter 获取详细信息；使用 get_related_components 获取关联组件详情。');
+
   return lines.join('\n');
 }
 

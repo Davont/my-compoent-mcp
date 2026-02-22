@@ -158,3 +158,12 @@ const Demo = () => (
 - **键盘**：Tab 聚焦触发元素时显示 Tooltip（`trigger="focus"` 或 hover 模式下也响应 focus）。
 - **焦点**：Tooltip 不抢夺焦点，焦点始终在触发元素上。
 - **ARIA**：浮层设置 `role="tooltip"`，触发元素通过 `aria-describedby` 关联。
+
+---
+
+## Related
+
+- `Button`：仅图标按钮必须配合 Tooltip 提供操作说明；disabled 按钮外层需包裹 `<span>` 才能触发 Tooltip。
+- `Modal`：需要用户确认操作时用 Modal 而非 Tooltip；Tooltip 仅用于只读提示。
+- `Select`：Select 中 disabled 选项可配合 Tooltip 说明禁用原因。
+- `Input`：Input 旁可用 Tooltip 提供格式说明或帮助信息。

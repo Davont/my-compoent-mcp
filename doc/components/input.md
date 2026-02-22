@@ -142,3 +142,12 @@ const Demo = () => (
 - [ ] **键盘**：支持 Tab 聚焦，Enter 触发 `onPressEnter`。
 - [ ] **焦点**：Focus Ring 清晰可见。
 - [ ] **ARIA**：配合 `<label>` 使用，或提供 `aria-label`。
+
+---
+
+## Related
+
+- `Select`：当选项为固定枚举值时用 Select 替代 Input；需要自由输入+建议时考虑 AutoComplete。
+- `Button`：表单中 Input 与 Button 搭配提交，搜索场景常组合使用（Input + 搜索按钮）。
+- `Tooltip`：可在 Input 旁用 Tooltip 提供输入格式说明或帮助信息。
+- `Modal`：Modal 内常包含 Input 作为表单输入，注意 `destroyOnClose` 对受控状态的影响。

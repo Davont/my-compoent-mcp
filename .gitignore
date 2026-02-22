@@ -1,2 +1,8 @@
 node_modules
 dist
+
+# claude-flow (removed)
+.swarm/
+.claude-flow/
+.claude/helpers/
+.mcp.json

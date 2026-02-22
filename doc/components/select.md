@@ -187,3 +187,12 @@ const Demo = () => <Select options={options} placeholder="请选择" />;
 - **键盘**：Tab 聚焦，Enter/Space 展开，上下箭头导航，Enter 选中，ESC 收起。
 - **焦点**：选择器有清晰的 focus 样式，下拉展开时焦点在搜索框或选项上。
 - **ARIA**：`role="combobox"`、`aria-expanded`、`aria-haspopup="listbox"`，选项 `role="option"`、`aria-selected`。
+
+---
+
+## Related
+
+- `Input`：自由文本输入用 Input，固定选项用 Select；需要输入+建议时用 AutoComplete。
+- `Button`：表单中 Select 与 Button 搭配使用，Select 选定后由 Button 提交。
+- `Tooltip`：Select 中 disabled 选项建议配合 Tooltip 说明禁用原因。
+- `Modal`：Modal 内使用 Select 时，注意将下拉浮层挂载到 Modal 容器内以避免层级问题。

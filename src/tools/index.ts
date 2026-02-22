@@ -17,6 +17,7 @@ import { getCodeBlockTool, handleGetCodeBlock } from './get-code-block.js';
 import { getComponentFileListTool, handleGetComponentFileList } from './get-component-file-list.js';
 import { getFileCodeTool, handleGetFileCode } from './get-file-code.js';
 import { getFunctionCodeTool, handleGetFunctionCode } from './get-function-code.js';
+import { getRelatedComponentsTool, handleGetRelatedComponents } from './get-related-components.js';
 
 /**
  * 所有工具的定义
@@ -32,6 +33,7 @@ export const tools: Tool[] = [
   getComponentFileListTool,
   getFileCodeTool,
   getFunctionCodeTool,
+  getRelatedComponentsTool,
 ];
 
 /**
@@ -51,6 +53,7 @@ export const toolHandlers: Record<
   [getComponentFileListTool.name]: handleGetComponentFileList,
   [getFileCodeTool.name]: handleGetFileCode,
   [getFunctionCodeTool.name]: handleGetFunctionCode,
+  [getRelatedComponentsTool.name]: handleGetRelatedComponents,
 };
 
 // 重新导出各工具
@@ -75,4 +78,6 @@ export {
   handleGetFileCode,
   getFunctionCodeTool,
   handleGetFunctionCode,
+  getRelatedComponentsTool,
+  handleGetRelatedComponents,
 };

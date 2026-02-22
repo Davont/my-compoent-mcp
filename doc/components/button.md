@@ -187,3 +187,12 @@ const Demo = () => (
 - [ ] **ARIA**：
   - 仅图标按钮必须有 `aria-label`。
   - 加载中状态建议配合 `aria-busy="true"` 或 `aria-live` 区域（通常由业务层处理，组件层提供基础支持）。
+
+---
+
+## Related
+
+- `Modal`：Button 常作为 Modal 的触发器和底部操作按钮；危险操作按钮需配合 Modal 做二次确认。
+- `Tooltip`：仅图标按钮必须配合 Tooltip 提供文字说明；disabled 按钮可用 Tooltip 解释禁用原因。
+- `Input`：表单场景中 Button 与 Input 搭配使用，注意表单内非提交按钮设置 `htmlType="button"`。
+- `Select`：表单场景中 Button 与 Select 搭配使用，提交按钮应在所有表单控件之后。

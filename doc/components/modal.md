@@ -196,3 +196,12 @@ const Demo = ({ visible, onClose }) => (
 - **键盘**：ESC 关闭，Tab 在 Modal 内循环聚焦。
 - **焦点**：打开时自动聚焦首个可聚焦元素，关闭后焦点返回触发元素。
 - **ARIA**：`role="dialog"`、`aria-modal="true"`、`aria-labelledby` 指向标题。
+
+---
+
+## Related
+
+- `Button`：Button 通常作为 Modal 的触发器；Modal 底部的确认/取消操作也使用 Button。
+- `Tooltip`：轻量提示场景优先使用 Tooltip 而非 Modal；Modal 内的图标按钮应配合 Tooltip。
+- `Input`：Modal 内嵌表单时常包含 Input；注意 `destroyOnClose` 会重置 Input 受控状态。
+- `Select`：Modal 内嵌表单时常包含 Select；注意下拉浮层的 `getPopupContainer` 应挂载到 Modal 内。

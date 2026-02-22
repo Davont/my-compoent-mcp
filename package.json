@@ -54,14 +54,17 @@
     "dev": "rslib build --watch",
     "start": "node dist/stdio.js",
     "start:http": "node dist/http.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "rstest"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
     "oxc-parser": "^0.106.0"
   },
   "devDependencies": {
+    "@claude-flow/cli": "^3.0.2",
     "@rslib/core": "^0.18.5",
+    "@rstest/core": "^0.0.5",
     "@types/node": "^24.10.4",
     "typescript": "^5.9.3"
   }
