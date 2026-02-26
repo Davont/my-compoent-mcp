@@ -59,7 +59,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "oxc-parser": "^0.106.0"
+    "@babel/parser": "^7.26.0"
   },
   "devDependencies": {
     "@claude-flow/cli": "^3.0.2",

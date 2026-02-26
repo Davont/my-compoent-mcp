@@ -1,11 +1,11 @@
-/** Adapted from semi-mcp — AST function body stripping using oxc-parser */
+/** Adapted from semi-mcp — AST function body stripping using @babel/parser */
 
 /**
  * 移除函数体和提取函数的工具函数
- * 使用 oxc-parser 进行 AST 解析
+ * 使用 @babel/parser 进行 AST 解析（ESTree 兼容模式）
  */
 
-import { parseSync } from 'oxc-parser';
+import { parse } from '@babel/parser';
 
 /**
  * 函数信息
@@ -257,13 +257,23 @@ function extractVariableDeclarationFunctions(ast: ASTNode, code: string, existin
  */
 export function findAllFunctions(code: string, filename: string = 'code.tsx'): FunctionInfo[] {
   try {
-    const result = parseSync(filename, code);
-    
+    const isTS = /\.tsx?$/.test(filename);
+    const isJSX = /\.[jt]sx$/.test(filename);
+
+    const result = parse(code, {
+      sourceType: 'module',
+      errorRecovery: true,
+      plugins: [
+        'estree',
+        ...(isTS ? ['typescript' as const] : []),
+        ...(isJSX ? ['jsx' as const] : []),
+      ],
+    });
+
     if (result.errors && result.errors.length > 0) {
-      // 解析有错误，但可能仍然有部分 AST
       console.warn('解析代码时有错误:', result.errors);
     }
-    
+
     const ast = result.program as unknown as ASTNode;
     const functions = extractFunctionsFromAST(ast, code);
     
