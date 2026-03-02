@@ -1,0 +1,16 @@
+{
+  "uiType": "form",
+  "description": "表单页面：用于数据录入、筛选、提交场景",
+  "components": ["Input", "Select", "Button"],
+  "tokenTypes": ["color", "spacing"],
+  "defaultSections": ["rules", "props"],
+  "checklist": [
+    "表单字段需要绑定 value 和 onChange（受控组件）",
+    "提交按钮使用 type=submit 或 onClick 触发校验",
+    "加载状态用 Button loading prop，禁止重复提交",
+    "Input 必填字段加 required，配合 label 说明用途",
+    "Select 选项数据通过 options prop 传入，不要硬编码",
+    "错误提示文案放在字段下方，使用 --md-color-error token"
+  ],
+  "hint": "生成表单代码时，优先使用受控组件模式，所有字段值统一用 state 管理"
+}

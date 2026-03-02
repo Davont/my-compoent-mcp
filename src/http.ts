@@ -15,6 +15,7 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMCPServer, getPackageVersion } from './server.js';
+import { tools } from './tools/index.js';
 
 // 会话存储：sessionId -> transport
 interface SessionInfo {
@@ -221,14 +222,7 @@ async function main() {
           mcp: { POST: '/mcp', GET: '/mcp (SSE)' },
           health: '/health',
         },
-        tools: [
-          'component_list',
-          'component_search', 
-          'component_details',
-          'component_examples',
-          'theme_tokens',
-          'changelog_query',
-        ],
+        tools: tools.map(t => t.name),
       }, null, 2));
       return;
     }

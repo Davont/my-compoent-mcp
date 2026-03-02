@@ -28,7 +28,7 @@ import {
  */
 export const componentDetailsTool: Tool = {
   name: 'component_details',
-  description: '获取 my-design 组件的详细文档。支持三种用法：1) brief=true 只返回组件概述和 Props 名称列表（推荐先调用）；2) 指定 sections 获取特定章节；3) propFilter 只获取指定属性的详情。生成代码前建议先 brief 了解组件，再按需获取详细信息。',
+  description: '获取 my-design 单个组件的详细文档。支持按需获取指定章节，包括 props、rules、examples、related 等。如果目标是生成页面代码，优先使用 get_context_bundle 工具。本工具适合 bundle 信息不足时的补充查询，或查询 bundle 未覆盖的组件。',
   inputSchema: {
     type: 'object',
     properties: {
@@ -43,7 +43,7 @@ export const componentDetailsTool: Tool = {
       sections: {
         type: 'array',
         items: { type: 'string' },
-        description: '要获取的章节列表。可选值：props、events、rules（核心规则）、behavior、when-to-use、accessibility、all（全部）。默认返回 props + rules。',
+        description: '要获取的章节列表。可选值：props、events、rules（核心规则）、examples（示例代码）、related（关联组件）、behavior、when-to-use、accessibility、all（全部）。默认返回 props + rules。',
       },
       propFilter: {
         type: 'array',
@@ -60,10 +60,11 @@ const SECTION_MAP: Record<string, string> = {
   'props': 'Props',
   'events': 'Events',
   'rules': '核心规则（AI 生成时必读）',
+  'examples': 'Examples',
+  'related': 'Related',
   'behavior': 'Behavior',
   'when-to-use': 'When to use',
   'accessibility': 'Accessibility',
-  'related': 'Related',
 };
 
 /**
@@ -128,7 +129,7 @@ function formatBriefOutput(
   }
 
   lines.push('');
-  lines.push('> 提示：使用 component_details 并指定 sections 和 propFilter 获取详细信息；使用 get_related_components 获取关联组件详情。');
+  lines.push('> 提示：使用 component_details 并指定 sections 获取详细信息（支持 props、rules、examples、related 等）。');
 
   return lines.join('\n');
 }

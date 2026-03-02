@@ -8,28 +8,29 @@
 export { createMCPServer, getPackageVersion } from './server.js';
 
 // 导出所有工具
-export { 
-  tools, 
+export {
+  tools,
   toolHandlers,
-  componentListTool,
-  handleComponentList,
+  // 公开工具
+  getContextBundleTool,
+  handleGetContextBundle,
   componentSearchTool,
   handleComponentSearch,
   componentDetailsTool,
   handleComponentDetails,
-  componentExamplesTool,
-  handleComponentExamples,
   themeTokensTool,
   handleThemeTokens,
   changelogQueryTool,
   handleChangelogQuery,
-  getCodeBlockTool,
+  sourceInspectTool,
+  handleSourceInspect,
+  // 内部工具 handler
+  handleComponentList,
+  handleComponentExamples,
+  handleGetRelatedComponents,
   handleGetCodeBlock,
-  getComponentFileListTool,
   handleGetComponentFileList,
-  getFileCodeTool,
   handleGetFileCode,
-  getFunctionCodeTool,
   handleGetFunctionCode,
 } from './tools/index.js';
 
