@@ -1,42 +1,31 @@
 /**
- * get_context_bundle 工具
+ * get_context_bundle 工具（v3 重构）
  *
- * 聚合工具：根据用户意图（goal + uiType）一次返回所需的所有上下文。
- * 服务端内部编排 search/details/examples/tokens 逻辑，对 AI 只暴露一次调用。
+ * 聚合工具：根据组件名列表或搜索关键词，一次返回所需的所有上下文。
+ * 数据源：.d.ts（Props 接口）+ .md（核心规则）
+ *
+ * 两种输入方式：
+ * - components: 直传组件名列表（精准获取，适合 DSL 场景）
+ * - query: 关键词搜索 + 同 category 扩展（模糊获取）
  *
  * 两层输出策略：
- * - depth=summary（默认）：精简结论，减少 token 消耗
- * - depth=full：完整内容，包含 props 表格和全部示例代码
+ * - depth=summary（默认）：Props 接口 + 核心规则摘要
+ * - depth=full：Props 接口 + 核心规则 + 全部示例
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { readFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import {
-  searchComponents,
   readComponentDoc,
   parseFrontmatter,
   extractSection,
   extractDescription,
-  extractPropNames,
-  readTokens,
+  getComponentList,
+  searchComponentsWithCategoryExpansion,
 } from '../utils/doc-reader.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// ============ Profile 类型 ============
-
-interface Profile {
-  uiType: string;
-  description: string;
-  components: string[];
-  tokenTypes: string[];
-  defaultSections: string[];
-  checklist: string[];
-  hint: string;
-}
+import {
+  resolvePackageRoot,
+  extractPropsFromDts,
+} from '../utils/source-code-reader.js';
 
 // ============ 内存缓存 ============
 
@@ -46,11 +35,10 @@ interface CacheEntry {
 }
 
 const cache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
-function getCacheKey(uiType: string, depth: string): string {
-  // goal/constraints 不参与 profile 内容构建，不纳入 key
-  return `${uiType}|${depth}`;
+function getCacheKey(components: string[], depth: string): string {
+  return `${[...components].sort().join(',')}|${depth}`;
 }
 
 function getFromCache(key: string): string | null {
@@ -67,186 +55,91 @@ function setCache(key: string, result: string): void {
   cache.set(key, { result, timestamp: Date.now() });
 }
 
-// ============ Profile 加载 ============
+// ============ 组件上下文构建 ============
 
-/**
- * 获取 doc/profiles/ 目录路径
- * 与 doc-reader 的 getDocPath 策略一致：
- *   打包产物 dist/*.js → __dirname = dist/ → ../doc/profiles
- *   源码运行 src/tools/*.ts → __dirname = src/tools/ → ../../doc/profiles
- */
-function getProfilesDir(): string {
-  const candidates = [
-    join(__dirname, '../doc/profiles'),
-    join(__dirname, '../../doc/profiles'),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-  // 兜底：返回第一个候选，loadProfile 内部会做 existsSync 判断
-  return candidates[0];
-}
-
-const AVAILABLE_UI_TYPES = ['form', 'table', 'modal'];
-
-function loadProfile(uiType: string): Profile | null {
-  const profilePath = join(getProfilesDir(), `${uiType}.json`);
-  if (!existsSync(profilePath)) return null;
-  return JSON.parse(readFileSync(profilePath, 'utf-8')) as Profile;
-}
-
-// ============ 内部编排逻辑 ============
-
-interface ComponentSummary {
+interface ComponentContext {
   name: string;
-  description: string;
   importStatement: string;
-  propNames: string[];
+  propsInterface: string | null;
+  propsFromMd: string | null;
   rules: string | null;
-  firstExample: string | null;
+  description: string;
+  examples: string | null;
 }
 
-interface ComponentFull extends ComponentSummary {
-  props: string | null;
-  allExamples: string | null;
+function getPackageRoot(): string | null {
+  try {
+    return resolvePackageRoot();
+  } catch {
+    return null;
+  }
 }
 
-function buildComponentSummary(name: string): ComponentSummary {
+function buildComponentContext(name: string, depth: string, packageRoot: string | null): ComponentContext {
   const doc = readComponentDoc(name);
-  if (!doc) {
-    return {
-      name,
-      description: '文档暂未收录',
-      importStatement: '',
-      propNames: [],
-      rules: null,
-      firstExample: null,
-    };
+  let importStatement = `import { ${name} } from '@my-design/react'`;
+  let description = '';
+  let rules: string | null = null;
+  let propsFromMd: string | null = null;
+  let examples: string | null = null;
+
+  if (doc) {
+    const { frontmatter, body } = parseFrontmatter(doc);
+    if (frontmatter?.import) {
+      importStatement = frontmatter.import;
+    }
+    description = extractDescription(body);
+    rules = extractSection(body, '核心规则（AI 生成时必读）');
+    propsFromMd = extractSection(body, 'Props');
+
+    if (depth === 'full') {
+      examples = extractSection(body, 'Examples');
+    }
   }
 
-  const { frontmatter, body } = parseFrontmatter(doc);
-  const description = extractDescription(body);
-  const importStatement = frontmatter?.import ?? '';
-
-  const propsSection = extractSection(body, 'Props');
-  const propNames = propsSection ? extractPropNames(propsSection) : [];
-
-  const rulesSection = extractSection(body, '核心规则（AI 生成时必读）');
-
-  // 只取第一个示例
-  const examplesSection = extractSection(body, 'Examples');
-  let firstExample: string | null = null;
-  if (examplesSection) {
-    const firstMatch = examplesSection.match(/### .+?\n[\s\S]*?(?=\n### |$)/);
-    if (firstMatch) {
-      firstExample = firstMatch[0].trim();
-    }
+  let propsInterface: string | null = null;
+  if (packageRoot) {
+    propsInterface = extractPropsFromDts(packageRoot, name);
   }
 
   return {
     name,
-    description,
     importStatement,
-    propNames,
-    rules: rulesSection,
-    firstExample,
+    propsInterface,
+    propsFromMd,
+    rules,
+    description,
+    examples,
   };
-}
-
-function buildComponentFull(name: string): ComponentFull {
-  const summary = buildComponentSummary(name);
-  const doc = readComponentDoc(name);
-
-  if (!doc) {
-    return { ...summary, props: null, allExamples: null };
-  }
-
-  const { body } = parseFrontmatter(doc);
-  const props = extractSection(body, 'Props');
-  const allExamples = extractSection(body, 'Examples');
-
-  return { ...summary, props, allExamples };
-}
-
-function buildTokenSummary(tokenTypes: string[]): string {
-  try {
-    const tokensData = readTokens();
-    const filtered = tokenTypes.includes('all')
-      ? tokensData.tokens
-      : tokensData.tokens.filter(t => tokenTypes.includes(t.type.toLowerCase()));
-
-    if (filtered.length === 0) return '';
-
-    const lines = ['**相关 Tokens**（使用 CSS 变量，勿硬编码）：'];
-    for (const t of filtered.slice(0, 20)) {
-      lines.push(`- \`${t.name}\` — ${t.description}（默认: \`${t.default}\`）`);
-    }
-    if (filtered.length > 20) {
-      lines.push(`- ... 共 ${filtered.length} 个，使用 theme_tokens 工具获取完整列表`);
-    }
-    return lines.join('\n');
-  } catch {
-    return '';
-  }
 }
 
 // ============ 输出格式化 ============
 
-function formatSummary(profile: Profile, components: ComponentSummary[], tokenSummary: string): string {
+function formatOutput(
+  components: ComponentContext[],
+  notFound: string[],
+  truncated: boolean,
+  depth: string
+): string {
   const lines: string[] = [];
 
-  lines.push(`# ${profile.uiType} 场景上下文（summary）\n`);
-  lines.push(`**场景说明**：${profile.description}\n`);
+  lines.push(`# 组件上下文（共 ${components.length} 个组件）\n`);
 
-  lines.push('## 推荐组件\n');
   for (const c of components) {
-    lines.push(`### ${c.name}`);
+    lines.push(`## ${c.name}`);
     if (c.description) lines.push(c.description);
-    if (c.importStatement) lines.push(`\`${c.importStatement}\``);
-    if (c.propNames.length > 0) {
-      lines.push(`**关键 Props**：${c.propNames.slice(0, 8).join('、')}${c.propNames.length > 8 ? '...' : ''}`);
+    lines.push(`\`${c.importStatement}\`\n`);
+
+    if (c.propsInterface) {
+      lines.push('### Props\n');
+      lines.push('```typescript');
+      lines.push(c.propsInterface);
+      lines.push('```\n');
+    } else if (c.propsFromMd) {
+      lines.push('### Props\n');
+      lines.push(c.propsFromMd);
+      lines.push('');
     }
-    if (c.rules) {
-      lines.push('\n**核心规则**：');
-      const ruleLines = c.rules.split('\n').filter(l => l.trim().startsWith('-')).slice(0, 5);
-      lines.push(ruleLines.join('\n'));
-    }
-    lines.push('');
-  }
-
-  if (tokenSummary) {
-    lines.push('## Design Tokens\n');
-    lines.push(tokenSummary);
-    lines.push('');
-  }
-
-  lines.push('## 实现 Checklist\n');
-  for (const item of profile.checklist) {
-    lines.push(`- [ ] ${item}`);
-  }
-  lines.push('');
-
-  if (profile.hint) {
-    lines.push(`> **实现建议**：${profile.hint}`);
-    lines.push('');
-  }
-
-  lines.push('---');
-  lines.push('> 需要完整 Props 表格或全部示例？再次调用 `get_context_bundle` 并传入 `depth="full"`');
-
-  return lines.join('\n');
-}
-
-function formatFull(profile: Profile, components: ComponentFull[], tokenSummary: string): string {
-  const lines: string[] = [];
-
-  lines.push(`# ${profile.uiType} 场景上下文（full）\n`);
-  lines.push(`**场景说明**：${profile.description}\n`);
-
-  for (const c of components) {
-    lines.push(`## ${c.name} 组件\n`);
-    if (c.description) lines.push(`${c.description}\n`);
-    if (c.importStatement) lines.push(`**引入**：\`${c.importStatement}\`\n`);
 
     if (c.rules) {
       lines.push('### 核心规则\n');
@@ -254,78 +147,41 @@ function formatFull(profile: Profile, components: ComponentFull[], tokenSummary:
       lines.push('');
     }
 
-    if (c.props) {
-      lines.push('### Props\n');
-      lines.push(c.props);
-      lines.push('');
-    }
-
-    // fix: 使用 allExamples 而非 firstExample
-    if (c.allExamples) {
+    if (depth === 'full' && c.examples) {
       lines.push('### 示例\n');
-      lines.push(c.allExamples);
+      lines.push(c.examples);
       lines.push('');
     }
   }
 
-  if (tokenSummary) {
-    lines.push('## Design Tokens\n');
-    lines.push(tokenSummary);
-    lines.push('');
-  }
-
-  lines.push('## 实现 Checklist\n');
-  for (const item of profile.checklist) {
-    lines.push(`- [ ] ${item}`);
-  }
-  lines.push('');
-
-  if (profile.hint) {
-    lines.push(`> **实现建议**：${profile.hint}`);
-  }
-
-  return lines.join('\n');
-}
-
-function formatUiTypeUnknown(goal: string): string {
-  const lines: string[] = [];
-  lines.push('## 需要补充参数：uiType\n');
-  lines.push(`收到需求：「${goal}」\n`);
-  lines.push('请从以下场景类型中选择一个，重新调用 `get_context_bundle` 并传入 `uiType`：\n');
-
-  for (const uiType of AVAILABLE_UI_TYPES) {
-    const profile = loadProfile(uiType);
-    if (profile) {
-      lines.push(`- **${uiType}** — ${profile.description}`);
+  // checklist：从各组件核心规则中自动提取
+  const checklistItems: string[] = [];
+  for (const c of components) {
+    if (c.rules) {
+      const ruleLines = c.rules
+        .split('\n')
+        .filter(l => l.trim().startsWith('-'))
+        .slice(0, 3);
+      checklistItems.push(...ruleLines);
     }
   }
-
-  lines.push('');
-  lines.push('> 如果没有合适的类型，传入 `uiType="other"`，将根据 goal 关键词搜索相关组件。');
-  return lines.join('\n');
-}
-
-function formatOtherGoal(goal: string): string {
-  const results = searchComponents(goal);
-  const lines: string[] = [];
-
-  lines.push(`# 通用场景上下文：「${goal}」\n`);
-
-  if (results.length === 0) {
-    lines.push('未找到相关组件。建议使用 `component_search` 工具进行更精确的搜索。');
-    return lines.join('\n');
-  }
-
-  lines.push(`根据需求找到 ${results.length} 个相关组件：\n`);
-  for (const c of results) {
-    const summary = buildComponentSummary(c.name);
-    lines.push(`## ${c.name}`);
-    if (summary.description) lines.push(summary.description);
-    if (summary.importStatement) lines.push(`\`${summary.importStatement}\``);
-    if (summary.propNames.length > 0) {
-      lines.push(`**Props**：${summary.propNames.slice(0, 6).join('、')}`);
+  if (checklistItems.length > 0) {
+    lines.push('## Checklist（自动生成）\n');
+    for (const item of checklistItems) {
+      const text = item.trim().replace(/^-\s*/, '');
+      lines.push(`- [ ] ${text}`);
     }
     lines.push('');
+  }
+
+  if (notFound.length > 0) {
+    const allComponents = getComponentList();
+    const available = allComponents.map(c => c.name).join(', ');
+    lines.push(`---\n> 未找到组件: ${notFound.join(', ')}。可用组件: ${available}`);
+  }
+
+  if (truncated) {
+    lines.push('---\n> 结果已截断（最多 5 个组件）。使用 `components` 参数精确指定需要的组件。');
   }
 
   return lines.join('\n');
@@ -336,32 +192,30 @@ function formatOtherGoal(goal: string): string {
 export const getContextBundleTool: Tool = {
   name: 'get_context_bundle',
   description:
-    '聚合工具：根据用户需求一次返回所需的所有组件上下文（推荐组件、关键 Props、核心规则、示例、Token、实现 Checklist）。\n' +
-    '替代多次单独调用 component_search / component_details / theme_tokens。\n\n' +
-    '【输出策略】\n' +
-    '- uiType=form/table/modal：走模板化稳定输出，不同 goal 返回相同的场景上下文（设计如此，保证稳定性）。\n' +
-    '- uiType=other：按 goal 关键词语义检索，返回匹配组件的上下文。\n\n' +
+    '聚合工具：一次返回多个组件的完整上下文（Props 接口、核心规则、示例）。\n' +
+    '替代多次单独调用 component_details / theme_tokens。\n\n' +
+    '两种使用方式：\n' +
+    '- components: 传组件名列表，精准获取（如 ["Button", "Input"]）\n' +
+    '- query: 传关键词搜索，自动匹配相关组件（如 "表单"）\n\n' +
     '推荐在生成页面代码前优先调用此工具。',
   inputSchema: {
     type: 'object',
     properties: {
-      goal: {
-        type: 'string',
-        description: '用自然语言描述需求，如"生成用户信息编辑表单"、"做一个带筛选的数据列表页"。',
+      components: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '组件名列表，如 ["Button", "Input", "Select"]。直接获取指定组件的上下文。',
       },
-      uiType: {
+      query: {
         type: 'string',
-        description:
-          '场景类型，枚举值：form（表单）、table（表格列表）、modal（弹窗）、other（其他，按 goal 搜索）。' +
-          '不传或传错时，工具会返回候选类型列表要求补充。',
+        description: '搜索关键词，如 "表单"、"弹窗"。自动匹配相关组件并返回上下文。',
       },
       depth: {
         type: 'string',
         description:
-          '输出详细程度：summary（默认，精简摘要）、full（完整 Props 表格 + 全部示例代码）。',
+          '输出详细程度：summary（默认，Props + 核心规则）、full（额外包含全部示例代码）。',
       },
     },
-    required: ['goal'],
   },
 };
 
@@ -370,66 +224,100 @@ export const getContextBundleTool: Tool = {
 export async function handleGetContextBundle(
   args: Record<string, unknown>
 ): Promise<CallToolResult> {
-  const goal = (args?.goal as string) ?? '';
-  const uiType = ((args?.uiType as string) ?? '').toLowerCase().trim();
+  const rawComponents = args?.components;
+  const components = Array.isArray(rawComponents)
+    ? rawComponents.filter((item): item is string => typeof item === 'string')
+    : undefined;
+  const query = typeof args?.query === 'string' ? args.query : undefined;
   const depth = ((args?.depth as string) ?? 'summary').toLowerCase().trim();
 
-  if (!goal) {
+  if ((!components || components.length === 0) && !query) {
     return {
-      content: [{ type: 'text', text: '请提供 goal 参数描述你的需求' }],
+      content: [{ type: 'text', text: '请提供 components（组件名列表）或 query（搜索关键词）参数' }],
       isError: true,
     };
   }
 
   try {
-    // uiType 未传或不在已知列表且不是 other → 返回候选列表
-    if (!uiType || (!AVAILABLE_UI_TYPES.includes(uiType) && uiType !== 'other')) {
-      return {
-        content: [{ type: 'text', text: formatUiTypeUnknown(goal) }],
-      };
+    let targetNames: string[];
+    let notFound: string[] = [];
+    let truncated = false;
+
+    if (components && components.length > 0) {
+      // 路径 A：components 直传
+      const allComponents = getComponentList();
+      const allNames = new Set(allComponents.map(c => c.name.toLowerCase()));
+      const aliasMap = new Map<string, string>();
+      for (const c of allComponents) {
+        if (c.aliases) {
+          for (const alias of c.aliases) {
+            aliasMap.set(alias.toLowerCase(), c.name);
+          }
+        }
+      }
+
+      targetNames = [];
+      for (const name of components) {
+        const lower = name.toLowerCase();
+        if (allNames.has(lower)) {
+          const found = allComponents.find(c => c.name.toLowerCase() === lower);
+          if (found) targetNames.push(found.name);
+        } else if (aliasMap.has(lower)) {
+          targetNames.push(aliasMap.get(lower)!);
+        } else {
+          notFound.push(name);
+        }
+      }
+
+      if (targetNames.length === 0) {
+        const available = allComponents.map(c => c.name).join(', ');
+        return {
+          content: [{
+            type: 'text',
+            text: `未找到任何指定组件。可用组件: ${available}`,
+          }],
+          isError: true,
+        };
+      }
+    } else {
+      // 路径 B：query 搜索
+      const searchResult = searchComponentsWithCategoryExpansion(query!);
+      if (searchResult.results.length === 0) {
+        const allComponents = getComponentList();
+        const available = allComponents.map(c => c.name).join(', ');
+        return {
+          content: [{
+            type: 'text',
+            text: `未找到与 "${query}" 相关的组件。可用组件: ${available}。建议使用 components 参数直接指定。`,
+          }],
+          isError: true,
+        };
+      }
+      targetNames = searchResult.results.map(r => r.name);
+      truncated = searchResult.truncated;
     }
 
-    // uiType=other → 按 goal 搜索组件
-    if (uiType === 'other') {
-      return {
-        content: [{ type: 'text', text: formatOtherGoal(goal) }],
-      };
-    }
-
-    // 检查缓存（key 只用 uiType + depth，profile 内容与 goal 无关）
-    const cacheKey = getCacheKey(uiType, depth);
+    // 缓存 key：components 路径排序（顺序无关），query 路径用 query 本身
+    const baseKey = query && (!components || components.length === 0)
+      ? `q:${query}|${depth}`
+      : getCacheKey(targetNames, depth);
+    const cacheKey = baseKey +
+      (notFound.length > 0 ? `|nf:${notFound.join(',')}` : '') +
+      (truncated ? '|trunc' : '');
     const cached = getFromCache(cacheKey);
     if (cached) {
       return {
-        content: [{ type: 'text', text: `[缓存命中]\n\n${cached}` }],
+        content: [{ type: 'text', text: cached }],
       };
     }
 
-    // 加载 profile
-    const profile = loadProfile(uiType);
-    if (!profile) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `未找到场景配置 "${uiType}"。可用类型：${AVAILABLE_UI_TYPES.join('、')}`,
-          },
-        ],
-        isError: true,
-      };
-    }
+    // 构建上下文
+    const packageRoot = getPackageRoot();
+    const contexts = targetNames.map(name =>
+      buildComponentContext(name, depth, packageRoot)
+    );
 
-    const tokenSummary = buildTokenSummary(profile.tokenTypes);
-
-    let output: string;
-    if (depth === 'full') {
-      const components = profile.components.map(buildComponentFull);
-      output = formatFull(profile, components, tokenSummary);
-    } else {
-      const components = profile.components.map(buildComponentSummary);
-      output = formatSummary(profile, components, tokenSummary);
-    }
-
+    const output = formatOutput(contexts, notFound, truncated, depth);
     setCache(cacheKey, output);
 
     return {

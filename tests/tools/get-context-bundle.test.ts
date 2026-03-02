@@ -1,91 +1,166 @@
 import { describe, it, expect } from '@rstest/core';
 import { handleGetContextBundle } from '../../src/tools/get-context-bundle';
 
-describe('get_context_bundle 参数校验', () => {
-  it('缺少 goal 返回 isError', async () => {
+// ============ 参数处理 ============
+
+describe('get_context_bundle 参数处理', () => {
+  it('components 和 query 都没传返回 isError', async () => {
     const result = await handleGetContextBundle({});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('goal');
+    expect(result.content[0].text).toContain('components');
+    expect(result.content[0].text).toContain('query');
   });
 
-  it('uiType 未传时返回候选类型列表', async () => {
-    const result = await handleGetContextBundle({ goal: '生成表单' });
+  it('components 优先于 query', async () => {
+    const result = await handleGetContextBundle({
+      components: ['Button'],
+      query: '表单',
+    });
     expect(result.isError).toBeUndefined();
     const text = result.content[0].text;
-    expect(text).toContain('uiType');
-    expect(text).toContain('form');
-    expect(text).toContain('table');
-    expect(text).toContain('modal');
-  });
-
-  it('uiType 传错误值时返回候选类型列表', async () => {
-    const result = await handleGetContextBundle({ goal: '生成表单', uiType: 'unknown_type' });
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('uiType');
-  });
-});
-
-describe('get_context_bundle uiType=other', () => {
-  it('other 分支按 goal 关键词搜索组件', async () => {
-    const result = await handleGetContextBundle({ goal: 'button', uiType: 'other' });
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('通用场景上下文');
-  });
-
-  it('other 分支无匹配时给出建议', async () => {
-    const result = await handleGetContextBundle({ goal: 'xyznotexist', uiType: 'other' });
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('未找到相关组件');
-  });
-});
-
-describe('get_context_bundle 正常场景', () => {
-  it('form + summary 返回推荐组件和 checklist', async () => {
-    const result = await handleGetContextBundle({ goal: '生成表单', uiType: 'form' });
-    expect(result.isError).toBeUndefined();
-    const text = result.content[0].text;
-    expect(text).toContain('推荐组件');
-    expect(text).toContain('Checklist');
-  });
-
-  it('form + summary 包含 Input、Select、Button', async () => {
-    const result = await handleGetContextBundle({ goal: '生成表单', uiType: 'form' });
-    const text = result.content[0].text;
-    expect(text).toContain('Input');
-    expect(text).toContain('Select');
     expect(text).toContain('Button');
+    // query "表单" 会匹配 Input，但 components 优先，不应走搜索
+    expect(text).toContain('共 1 个组件');
   });
 
-  it('form + full 包含 Props 章节', async () => {
-    const result = await handleGetContextBundle({ goal: '生成表单', uiType: 'form', depth: 'full' });
+  it('components 含不存在的组件名时部分返回 + 提示', async () => {
+    const result = await handleGetContextBundle({
+      components: ['Button', 'NonExistComponent'],
+    });
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('Props');
+    const text = result.content[0].text;
+    expect(text).toContain('Button');
+    expect(text).toContain('未找到组件');
+    expect(text).toContain('NonExistComponent');
   });
 
-  it('form + full 包含示例代码', async () => {
-    const result = await handleGetContextBundle({ goal: '生成表单', uiType: 'form', depth: 'full' });
-    expect(result.content[0].text).toContain('示例');
-  });
-
-  it('table + summary 正常返回', async () => {
-    const result = await handleGetContextBundle({ goal: '数据列表页', uiType: 'table' });
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('table');
-  });
-
-  it('modal + summary 正常返回', async () => {
-    const result = await handleGetContextBundle({ goal: '确认弹窗', uiType: 'modal' });
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('modal');
+  it('components 全部不存在返回 isError', async () => {
+    const result = await handleGetContextBundle({
+      components: ['Foo', 'Bar'],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('未找到任何指定组件');
   });
 });
+
+// ============ query 搜索 ============
+
+describe('get_context_bundle query 搜索', () => {
+  it('keyword 命中 + category 扩展', async () => {
+    const result = await handleGetContextBundle({ query: '表单' });
+    expect(result.isError).toBeUndefined();
+    const text = result.content[0].text;
+    // Input 的 keywords 含 "表单"，category=form
+    // Button 和 Select 也是 category=form，应被扩展进来
+    expect(text).toContain('Input');
+    expect(text).toContain('Button');
+    expect(text).toContain('Select');
+  });
+
+  it('name/alias 精确匹配排在前面', async () => {
+    const result = await handleGetContextBundle({ query: '按钮' });
+    expect(result.isError).toBeUndefined();
+    const text = result.content[0].text;
+    // Button 的 aliases 含 "按钮"，应排在最前
+    expect(text).toContain('Button');
+    // 确保 Button 出现在其他 form 组件之前
+    const buttonPos = text.indexOf('## Button');
+    const inputPos = text.indexOf('## Input');
+    if (buttonPos !== -1 && inputPos !== -1) {
+      expect(buttonPos).toBeLessThan(inputPos);
+    }
+  });
+
+  it('0 命中返回 isError + 可用组件列表', async () => {
+    const result = await handleGetContextBundle({ query: '图表统计' });
+    expect(result.isError).toBe(true);
+    const text = result.content[0].text;
+    expect(text).toContain('未找到');
+    expect(text).toContain('可用组件');
+  });
+});
+
+// ============ 数据源降级 ============
+
+describe('get_context_bundle 数据源', () => {
+  it('有 .md 的组件返回核心规则', async () => {
+    const result = await handleGetContextBundle({ components: ['Button'] });
+    const text = result.content[0].text;
+    expect(text).toContain('Button');
+    // Button 有 .md 文档，应有核心规则
+    expect(text).toContain('核心规则');
+  });
+
+  it('summary 模式不包含示例', async () => {
+    const result = await handleGetContextBundle({
+      components: ['Button'],
+      depth: 'summary',
+    });
+    const text = result.content[0].text;
+    expect(text).not.toContain('### 示例');
+  });
+
+  it('full 模式包含示例', async () => {
+    const result = await handleGetContextBundle({
+      components: ['Button'],
+      depth: 'full',
+    });
+    const text = result.content[0].text;
+    expect(text).toContain('示例');
+  });
+
+  it('返回包含 Props 信息', async () => {
+    const result = await handleGetContextBundle({ components: ['Button'] });
+    const text = result.content[0].text;
+    expect(text).toContain('Props');
+  });
+});
+
+// ============ checklist ============
+
+describe('get_context_bundle checklist', () => {
+  it('自动从核心规则生成 checklist', async () => {
+    const result = await handleGetContextBundle({
+      components: ['Button', 'Input'],
+    });
+    const text = result.content[0].text;
+    expect(text).toContain('Checklist');
+    expect(text).toContain('- [ ]');
+  });
+});
+
+// ============ 缓存 ============
 
 describe('get_context_bundle 缓存', () => {
-  it('相同 uiType+depth 第二次命中缓存', async () => {
-    // 第一次
-    await handleGetContextBundle({ goal: '任意需求', uiType: 'form', depth: 'summary' });
-    // 第二次应命中缓存
-    const result = await handleGetContextBundle({ goal: '另一个需求', uiType: 'form', depth: 'summary' });
-    expect(result.content[0].text).toContain('缓存命中');
+  it('相同 components + depth 二次调用命中缓存', async () => {
+    // 第一次调用
+    const result1 = await handleGetContextBundle({
+      components: ['Modal'],
+      depth: 'summary',
+    });
+    expect(result1.isError).toBeUndefined();
+    // 第二次调用，应返回相同内容
+    const result2 = await handleGetContextBundle({
+      components: ['Modal'],
+      depth: 'summary',
+    });
+    expect(result2.content[0].text).toBe(result1.content[0].text);
+  });
+
+  it('不同 components 不命中缓存', async () => {
+    const result1 = await handleGetContextBundle({ components: ['Button'] });
+    const result2 = await handleGetContextBundle({ components: ['Input'] });
+    expect(result1.content[0].text).not.toBe(result2.content[0].text);
+  });
+});
+
+// ============ 别名支持 ============
+
+describe('get_context_bundle 别名', () => {
+  it('支持通过别名获取组件', async () => {
+    const result = await handleGetContextBundle({ components: ['Btn'] });
+    expect(result.isError).toBeUndefined();
+    const text = result.content[0].text;
+    expect(text).toContain('Button');
   });
 });

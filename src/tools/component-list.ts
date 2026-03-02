@@ -12,7 +12,7 @@ import { getComponentList, ComponentIndexEntry } from '../utils/doc-reader.js';
  */
 export const componentListTool: Tool = {
   name: 'component_list',
-  description: '获取 my-design 组件库的完整组件列表。适用于需要浏览所有可用组件的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具，它会根据场景自动推荐组件。',
+  description: '获取 my-design 组件库的完整组件列表。适用于需要浏览所有可用组件的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具（支持 components 或 query 参数）。',
   inputSchema: {
     type: 'object',
     properties: {

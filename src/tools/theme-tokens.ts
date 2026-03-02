@@ -12,7 +12,7 @@ import { readTokens, readThemes, TokenDefinition } from '../utils/doc-reader.js'
  */
 export const themeTokensTool: Tool = {
   name: 'theme_tokens',
-  description: '获取 my-design 完整的 Design Token 列表和主题信息。适用于需要查询完整 token 列表或特定主题值的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具，它已按场景筛选返回相关 token。本工具适合需要查看全量 token 或切换主题时的补充调用。',
+  description: '获取 my-design 完整的 Design Token 列表和主题信息。适用于需要查询完整 token 列表或特定主题值的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具获取组件上下文。本工具适合需要查看全量 token 或切换主题时的补充调用。',
   inputSchema: {
     type: 'object',
     properties: {

@@ -12,7 +12,7 @@ import { searchComponents, ComponentIndexEntry } from '../utils/doc-reader.js';
  */
 export const componentSearchTool: Tool = {
   name: 'component_search',
-  description: '搜索 my-design 组件库的组件。适用于只需查找特定组件名称的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具，它会根据场景自动完成搜索和上下文组装。本工具适合 get_context_bundle 无法覆盖的自定义场景（uiType="other" 时的补充查询）。',
+  description: '搜索 my-design 组件库的组件。适用于只需查找特定组件名称的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具（支持 components 精准获取或 query 关键词搜索）。本工具适合需要单独查找组件名时的补充调用。',
   inputSchema: {
     type: 'object',
     properties: {

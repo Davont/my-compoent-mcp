@@ -453,3 +453,61 @@ export function searchComponents(query: string): ComponentIndexEntry[] {
     return false;
   });
 }
+
+/** 搜索结果条目（带匹配优先级） */
+export interface SearchResultEntry extends ComponentIndexEntry {
+  matchLevel: 1 | 2 | 3; // 1=name/alias精确, 2=keyword命中, 3=category扩展
+}
+
+/**
+ * 搜索组件 + 按 category 扩展同类组件
+ *
+ * 排序优先级：name/alias 精确匹配 > keyword 命中 > category 扩展
+ * 硬性上限：最多返回 maxResults 个组件
+ *
+ * @param query - 搜索关键词
+ * @param maxResults - 最大返回数量，默认 5
+ */
+export function searchComponentsWithCategoryExpansion(
+  query: string,
+  maxResults: number = 5
+): { results: SearchResultEntry[]; truncated: boolean } {
+  const index = readDocIndex();
+  const lowerQuery = query.toLowerCase();
+
+  const resultMap = new Map<string, SearchResultEntry>();
+  const matchedCategories = new Set<string>();
+
+  for (const c of index.components) {
+    const nameMatch = c.name.toLowerCase() === lowerQuery ||
+      c.aliases?.some(a => a.toLowerCase() === lowerQuery);
+    const nameContains = c.name.toLowerCase().includes(lowerQuery) ||
+      c.aliases?.some(a => a.toLowerCase().includes(lowerQuery));
+    const keywordMatch = c.keywords?.some(k => k.toLowerCase().includes(lowerQuery));
+    const categoryMatch = c.category.toLowerCase().includes(lowerQuery);
+
+    if (nameMatch || nameContains) {
+      resultMap.set(c.name, { ...c, matchLevel: 1 });
+      matchedCategories.add(c.category);
+    } else if (keywordMatch || categoryMatch) {
+      resultMap.set(c.name, { ...c, matchLevel: 2 });
+      matchedCategories.add(c.category);
+    }
+  }
+
+  if (matchedCategories.size > 0) {
+    for (const c of index.components) {
+      if (!resultMap.has(c.name) && matchedCategories.has(c.category)) {
+        resultMap.set(c.name, { ...c, matchLevel: 3 });
+      }
+    }
+  }
+
+  const sorted = [...resultMap.values()].sort((a, b) => a.matchLevel - b.matchLevel);
+  const truncated = sorted.length > maxResults;
+
+  return {
+    results: sorted.slice(0, maxResults),
+    truncated,
+  };
+}

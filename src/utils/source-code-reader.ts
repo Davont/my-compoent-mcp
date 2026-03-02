@@ -277,6 +277,50 @@ export function readSourceFile(packageRoot: string, relativePath: string): strin
  * @param packageRoot - 包根目录的绝对路径
  * @returns 排序后的目录名数组
  */
+/**
+ * 从组件的 .d.ts 文件中提取 Props 接口文本
+ *
+ * 在包的 components/{componentName}/index.d.ts 中查找
+ * export interface XxxProps { ... } 并返回原始文本。
+ *
+ * @param packageRoot - 包根目录的绝对路径
+ * @param componentName - 组件名称（如 Button，大小写不敏感）
+ * @returns Props 接口文本，找不到或解析失败返回 null
+ */
+export function extractPropsFromDts(
+  packageRoot: string,
+  componentName: string
+): string | null {
+  const normalizedName = componentName.toLowerCase();
+
+  const candidates = [
+    join(packageRoot, 'components', normalizedName, 'index.d.ts'),
+    join(packageRoot, 'components', componentName, 'index.d.ts'),
+    join(packageRoot, normalizedName, 'index.d.ts'),
+    join(packageRoot, componentName, 'index.d.ts'),
+  ];
+
+  let dtsContent: string | null = null;
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      try {
+        dtsContent = readFileSync(candidate, 'utf-8');
+        break;
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  if (!dtsContent) return null;
+
+  const interfaceRegex = /export interface \w+Props[\s\S]*?\n\}/g;
+  const matches = dtsContent.match(interfaceRegex);
+  if (!matches || matches.length === 0) return null;
+
+  return matches.join('\n\n');
+}
+
 export function listTopLevelDirectories(packageRoot: string): string[] {
   for (const candidate of COMPONENT_DIR_CANDIDATES) {
     const searchDir = candidate ? join(packageRoot, candidate) : packageRoot;
