@@ -114,6 +114,15 @@ describe('get_context_bundle 数据源', () => {
     const text = result.content[0].text;
     expect(text).toContain('Props');
   });
+
+  it('包含推荐 imports 区块', async () => {
+    const result = await handleGetContextBundle({
+      components: ['Button', 'Input', 'Select'],
+    });
+    const text = result.content[0].text;
+    expect(text).toContain('推荐 Imports');
+    expect(text).toContain("import { Button, Input, Select } from '@my-design/react';");
+  });
 });
 
 // ============ checklist ============

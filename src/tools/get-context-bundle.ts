@@ -113,6 +113,54 @@ function buildComponentContext(name: string, depth: string, packageRoot: string 
   };
 }
 
+function collectRecommendedImports(
+  components: Array<{ importStatement: string }>
+): string[] {
+  const namedImportsByModule = new Map<string, Set<string>>();
+  const otherImports: string[] = [];
+  const seenOther = new Set<string>();
+
+  for (const c of components) {
+    const raw = c.importStatement?.trim();
+    if (!raw) continue;
+
+    const normalized = raw.endsWith(';') ? raw : `${raw};`;
+    const namedImportMatch = normalized.match(
+      /^import\s*\{\s*([^}]+)\s*\}\s*from\s*['"]([^'"]+)['"]\s*;?$/
+    );
+
+    if (namedImportMatch) {
+      const members = namedImportMatch[1]
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      const moduleName = namedImportMatch[2];
+
+      if (!namedImportsByModule.has(moduleName)) {
+        namedImportsByModule.set(moduleName, new Set<string>());
+      }
+      const memberSet = namedImportsByModule.get(moduleName)!;
+      for (const member of members) {
+        memberSet.add(member);
+      }
+      continue;
+    }
+
+    if (!seenOther.has(normalized)) {
+      seenOther.add(normalized);
+      otherImports.push(normalized);
+    }
+  }
+
+  const mergedNamedImports: string[] = [];
+  for (const [moduleName, memberSet] of namedImportsByModule.entries()) {
+    const members = Array.from(memberSet).sort().join(', ');
+    mergedNamedImports.push(`import { ${members} } from '${moduleName}';`);
+  }
+
+  return [...mergedNamedImports, ...otherImports];
+}
+
 // ============ 输出格式化 ============
 
 function formatOutput(
@@ -122,8 +170,17 @@ function formatOutput(
   depth: string
 ): string {
   const lines: string[] = [];
+  const recommendedImports = collectRecommendedImports(components);
 
   lines.push(`# 组件上下文（共 ${components.length} 个组件）\n`);
+
+  if (recommendedImports.length > 0) {
+    lines.push('## 推荐 Imports（放在文件顶部）\n');
+    lines.push('```ts');
+    lines.push(...recommendedImports);
+    lines.push('```');
+    lines.push('');
+  }
 
   for (const c of components) {
     lines.push(`## ${c.name}`);
@@ -268,6 +325,8 @@ export async function handleGetContextBundle(
           notFound.push(name);
         }
       }
+
+      targetNames = [...new Set(targetNames)];
 
       if (targetNames.length === 0) {
         const available = allComponents.map(c => c.name).join(', ');
