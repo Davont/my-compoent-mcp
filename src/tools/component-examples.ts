@@ -10,19 +10,20 @@
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { 
-  readComponentDoc, 
+import {
+  readComponentDoc,
   extractSection,
   parseExamples,
-  getComponentList 
+  getComponentList
 } from '../utils/doc-reader.js';
+import { LIBRARY_DISPLAY_NAME } from '../config.js';
 
 /**
  * 工具定义
  */
 export const componentExamplesTool: Tool = {
   name: 'component_examples',
-  description: '获取 my-design 单个组件的代码示例。适用于需要查看具体组件完整示例的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具（depth="full" 时已包含各组件的首个示例）。本工具适合需要查看更多示例变体时的补充调用。',
+  description: `获取 ${LIBRARY_DISPLAY_NAME} 单个组件的代码示例。适用于需要查看具体组件完整示例的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具（depth="full" 时已包含各组件的首个示例）。本工具适合需要查看更多示例变体时的补充调用。`,
   inputSchema: {
     type: 'object',
     properties: {

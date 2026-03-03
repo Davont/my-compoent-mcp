@@ -9,9 +9,9 @@ import { readFileSync, existsSync, readdirSync, realpathSync, openSync, readSync
 import { join, resolve, sep, dirname } from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+import { PACKAGE_NAME, ENV_PACKAGE_ROOT, ENV_PACKAGE_ROOT_LEGACY } from '../config.js';
 
-const DEFAULT_PACKAGE_NAME = '@my-design/react';
-const ENV_PACKAGE_ROOT = 'MY_DESIGN_PACKAGE_ROOT';
+const DEFAULT_PACKAGE_NAME = PACKAGE_NAME;
 
 const EXCLUDE_PATH_SEGMENTS = [
   '/node_modules/',
@@ -139,14 +139,15 @@ function listFilesRecursive(dir: string, depth: number): string[] {
  * 解析组件库包的根目录路径
  *
  * 优先级：
- * 1. 环境变量 MY_DESIGN_PACKAGE_ROOT（如果设置且目录存在）
- * 2. process.cwd()/node_modules/{packageName}
+ * 1. 环境变量 COMPONENT_PACKAGE_ROOT（config.ts: ENV_PACKAGE_ROOT）
+ * 2. 兼容旧环境变量 MY_DESIGN_PACKAGE_ROOT（config.ts: ENV_PACKAGE_ROOT_LEGACY）
+ * 3. process.cwd()/node_modules/{packageName}
  *
- * @param packageName - 包名，默认 @my-design/react
+ * @param packageName - 包名，默认取 config.ts 的 PACKAGE_NAME
  * @returns 包的真实根目录路径（已解析 symlink）
  */
 export function resolvePackageRoot(packageName: string = DEFAULT_PACKAGE_NAME): string {
-  const envRoot = process.env[ENV_PACKAGE_ROOT];
+  const envRoot = process.env[ENV_PACKAGE_ROOT] || process.env[ENV_PACKAGE_ROOT_LEGACY];
   if (envRoot && existsSync(envRoot)) {
     return realpathSync(envRoot);
   }

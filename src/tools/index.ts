@@ -1,7 +1,7 @@
 /**
  * 工具注册
  *
- * 对外公开 7 个工具。旧工具 handler 保留可内部复用，但不注册到 MCP。
+ * 对外公开 6 个工具。旧工具 handler 保留可内部复用，但不注册到 MCP。
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';

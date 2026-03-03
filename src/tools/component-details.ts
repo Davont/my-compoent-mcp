@@ -11,24 +11,25 @@
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { 
-  readComponentDoc, 
-  parseFrontmatter, 
+import {
+  readComponentDoc,
+  parseFrontmatter,
   extractSection,
   extractDescription,
   extractPropNames,
   filterProps,
   isLargeDocument,
   replaceCodeBlocksWithPlaceholders,
-  getComponentList 
+  getComponentList
 } from '../utils/doc-reader.js';
+import { LIBRARY_DISPLAY_NAME } from '../config.js';
 
 /**
  * 工具定义
  */
 export const componentDetailsTool: Tool = {
   name: 'component_details',
-  description: '获取 my-design 单个组件的详细文档。支持按需获取指定章节，包括 props、rules、examples、related 等。如果目标是生成页面代码，优先使用 get_context_bundle 工具。本工具适合 bundle 信息不足时的补充查询，或查询 bundle 未覆盖的组件。',
+  description: `获取 ${LIBRARY_DISPLAY_NAME} 单个组件的详细文档。支持按需获取指定章节，包括 props、rules、examples、related 等。如果目标是生成页面代码，优先使用 get_context_bundle 工具。本工具适合 bundle 信息不足时的补充查询，或查询 bundle 未覆盖的组件。`,
   inputSchema: {
     type: 'object',
     properties: {

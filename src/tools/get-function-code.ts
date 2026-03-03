@@ -7,6 +7,7 @@
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { resolvePackageRoot, readSourceFile } from '../utils/source-code-reader.js';
 import { extractFunction, getFunctionNames } from '../utils/remove-function-body.js';
+import { PACKAGE_NAME } from '../config.js';
 
 /**
  * 解析文件路径
@@ -40,14 +41,14 @@ export const getFunctionCodeTool: Tool = {
 - getter/setter: get foo() {} / set foo() {}
 
 路径格式示例：
-- @my-design/react/Button/index.tsx
-- @my-design/react/Table/Table.tsx`,
+- ${PACKAGE_NAME}/Button/index.tsx
+- ${PACKAGE_NAME}/Table/Table.tsx`,
   inputSchema: {
     type: 'object' as const,
     properties: {
       filePath: {
         type: 'string',
-        description: '文件完整路径，如 @my-design/react/Table/Table.tsx',
+        description: `文件完整路径，如 ${PACKAGE_NAME}/Table/Table.tsx`,
       },
       functionName: {
         type: 'string',
@@ -97,7 +98,7 @@ export async function handleGetFunctionCode(
       content: [
         {
           type: 'text',
-          text: `错误：无效的文件路径格式。路径应为 @scope/package/path 格式。\n\n提供的路径: ${filePath}\n\n示例: @my-design/react/Button/index.tsx`,
+          text: `错误：无效的文件路径格式。路径应为 @scope/package/path 格式。\n\n提供的路径: ${filePath}\n\n示例: ${PACKAGE_NAME}/Button/index.tsx`,
         },
       ],
       isError: true,

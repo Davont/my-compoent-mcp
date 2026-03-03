@@ -6,13 +6,14 @@
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { readTokens, readThemes, TokenDefinition } from '../utils/doc-reader.js';
+import { LIBRARY_DISPLAY_NAME } from '../config.js';
 
 /**
  * 工具定义
  */
 export const themeTokensTool: Tool = {
   name: 'theme_tokens',
-  description: '获取 my-design 完整的 Design Token 列表和主题信息。适用于需要查询完整 token 列表或特定主题值的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具获取组件上下文。本工具适合需要查看全量 token 或切换主题时的补充调用。',
+  description: `获取 ${LIBRARY_DISPLAY_NAME} 完整的 Design Token 列表和主题信息。适用于需要查询完整 token 列表或特定主题值的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具获取组件上下文。本工具适合需要查看全量 token 或切换主题时的补充调用。`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -53,7 +54,7 @@ function formatTokenList(tokens: TokenDefinition[], type?: string): string {
   }, {} as Record<string, TokenDefinition[]>);
   
   const lines: string[] = [];
-  lines.push(`# my-design Design Tokens\n`);
+  lines.push(`# ${LIBRARY_DISPLAY_NAME} Design Tokens\n`);
   lines.push(`共 ${filteredTokens.length} 个 token\n`);
   lines.push('> 生成代码时，请使用 CSS 变量（如 `var(--md-color-primary)`），避免硬编码值。\n');
   

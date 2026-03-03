@@ -6,6 +6,7 @@
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { readChangelog } from '../utils/doc-reader.js';
+import { LIBRARY_DISPLAY_NAME } from '../config.js';
 
 /** 每页行数 */
 const PAGE_SIZE = 100;
@@ -15,7 +16,7 @@ const PAGE_SIZE = 100;
  */
 export const changelogQueryTool: Tool = {
   name: 'changelog_query',
-  description: '查询 my-design 组件库的变更日志（Changelog）和迁移指南。用于：1) 了解版本更新内容；2) 查找 Breaking Changes 和迁移方法；3) 排查版本升级问题。支持按版本号过滤和分页。',
+  description: `查询 ${LIBRARY_DISPLAY_NAME} 组件库的变更日志（Changelog）和迁移指南。用于：1) 了解版本更新内容；2) 查找 Breaking Changes 和迁移方法；3) 排查版本升级问题。支持按版本号过滤和分页。`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -174,7 +175,7 @@ export async function handleChangelogQuery(
       if (page > 1) navHint.push(`上一页: page=${page - 1}`);
       if (page < paginated.totalPages) navHint.push(`下一页: page=${page + 1}`);
 
-      output = `# my-design Changelog\n\n${pageInfo}\n${navHint.length > 0 ? `[提示: ${navHint.join(', ')}]\n` : ''}\n${paginated.content}`;
+      output = `# ${LIBRARY_DISPLAY_NAME} Changelog\n\n${pageInfo}\n${navHint.length > 0 ? `[提示: ${navHint.join(', ')}]\n` : ''}\n${paginated.content}`;
     }
 
     return {

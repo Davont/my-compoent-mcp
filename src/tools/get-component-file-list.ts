@@ -6,20 +6,21 @@
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { resolvePackageRoot, listComponentFiles, listTopLevelDirectories } from '../utils/source-code-reader.js';
+import { LIBRARY_DISPLAY_NAME, PACKAGE_NAME } from '../config.js';
 
 /**
  * 工具定义
  */
 export const getComponentFileListTool: Tool = {
   name: 'get_component_file_list',
-  description: `获取 my-design 组件的所有源码文件路径列表。
+  description: `获取 ${LIBRARY_DISPLAY_NAME} 组件的所有源码文件路径列表。
 
-返回组件在 @my-design/react 中的所有文件路径。
+返回组件在 ${PACKAGE_NAME} 中的所有文件路径。
 
 路径格式示例：
-- @my-design/react/Button/index.tsx
-- @my-design/react/Button/Button.tsx
-- @my-design/react/Button/style/index.scss
+- ${PACKAGE_NAME}/Button/index.tsx
+- ${PACKAGE_NAME}/Button/Button.tsx
+- ${PACKAGE_NAME}/Button/style/index.scss
 
 使用场景：
 1. 先调用此工具获取组件文件列表
@@ -34,7 +35,7 @@ export const getComponentFileListTool: Tool = {
       },
       packageName: {
         type: 'string',
-        description: 'npm 包名，默认为 "@my-design/react"',
+        description: `npm 包名，默认为 "${PACKAGE_NAME}"`,
       },
     },
     required: ['componentName'],

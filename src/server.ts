@@ -17,6 +17,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { tools, toolHandlers } from './tools/index.js';
 import { getComponentList, readDocIndex } from './utils/doc-reader.js';
+import { LIBRARY_ID, LIBRARY_DISPLAY_NAME } from './config.js';
 
 // 获取当前文件的目录路径
 const __filename = fileURLToPath(import.meta.url);
@@ -52,7 +53,7 @@ export function createMCPServer(): Server {
   // 创建 MCP 服务器实例
   const server = new Server(
     {
-      name: 'my-design-mcp',
+      name: `${LIBRARY_ID}-mcp`,
       version,
     },
     {
@@ -91,21 +92,21 @@ export function createMCPServer(): Server {
     return {
       resources: [
         {
-          uri: 'my-design://components',
-          name: 'my-design Components',
-          description: 'my-design 组件列表',
+          uri: `${LIBRARY_ID}://components`,
+          name: `${LIBRARY_DISPLAY_NAME} Components`,
+          description: `${LIBRARY_DISPLAY_NAME} 组件列表`,
           mimeType: 'application/json',
         },
         {
-          uri: 'my-design://tokens',
-          name: 'my-design Tokens',
-          description: 'my-design Design Token 列表',
+          uri: `${LIBRARY_ID}://tokens`,
+          name: `${LIBRARY_DISPLAY_NAME} Tokens`,
+          description: `${LIBRARY_DISPLAY_NAME} Design Token 列表`,
           mimeType: 'application/json',
         },
         {
-          uri: 'my-design://guidelines',
-          name: 'my-design Guidelines',
-          description: 'my-design 设计规范目录',
+          uri: `${LIBRARY_ID}://guidelines`,
+          name: `${LIBRARY_DISPLAY_NAME} Guidelines`,
+          description: `${LIBRARY_DISPLAY_NAME} 设计规范目录`,
           mimeType: 'application/json',
         },
       ],
@@ -118,7 +119,7 @@ export function createMCPServer(): Server {
 
     try {
       // 组件列表资源
-      if (uri === 'my-design://components') {
+      if (uri === `${LIBRARY_ID}://components`) {
         const components = getComponentList();
         return {
           contents: [
@@ -134,7 +135,7 @@ export function createMCPServer(): Server {
                     aliases: c.aliases,
                   })),
                   count: components.length,
-                  description: 'my-design 组件列表',
+                  description: `${LIBRARY_DISPLAY_NAME} 组件列表`,
                   note: '使用 component_details 工具获取组件详细信息',
                 },
                 null,
@@ -146,7 +147,7 @@ export function createMCPServer(): Server {
       }
 
       // Token 资源
-      if (uri === 'my-design://tokens') {
+      if (uri === `${LIBRARY_ID}://tokens`) {
         // 简化返回，详细信息通过 theme_tokens 工具获取
         return {
           contents: [
@@ -155,7 +156,7 @@ export function createMCPServer(): Server {
               mimeType: 'application/json',
               text: JSON.stringify(
                 {
-                  description: 'my-design Design Token',
+                  description: `${LIBRARY_DISPLAY_NAME} Design Token`,
                   note: '使用 theme_tokens 工具获取详细 token 信息',
                   availableTypes: ['color', 'spacing', 'radius', 'font', 'shadow'],
                   availableThemes: ['light', 'dark'],
@@ -169,7 +170,7 @@ export function createMCPServer(): Server {
       }
 
       // 规范资源
-      if (uri === 'my-design://guidelines') {
+      if (uri === `${LIBRARY_ID}://guidelines`) {
         const index = readDocIndex();
         return {
           contents: [
@@ -180,7 +181,7 @@ export function createMCPServer(): Server {
                 {
                   guidelines: index.guidelines,
                   count: index.guidelines.length,
-                  description: 'my-design 设计规范目录',
+                  description: `${LIBRARY_DISPLAY_NAME} 设计规范目录`,
                 },
                 null,
                 2

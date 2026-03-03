@@ -26,6 +26,7 @@ import {
   resolvePackageRoot,
   extractPropsFromDts,
 } from '../utils/source-code-reader.js';
+import { PACKAGE_NAME } from '../config.js';
 
 // ============ 内存缓存 ============
 
@@ -77,7 +78,7 @@ function getPackageRoot(): string | null {
 
 function buildComponentContext(name: string, depth: string, packageRoot: string | null): ComponentContext {
   const doc = readComponentDoc(name);
-  let importStatement = `import { ${name} } from '@my-design/react'`;
+  let importStatement = `import { ${name} } from '${PACKAGE_NAME}'`;
   let description = '';
   let rules: string | null = null;
   let propsFromMd: string | null = null;
@@ -86,7 +87,20 @@ function buildComponentContext(name: string, depth: string, packageRoot: string 
   if (doc) {
     const { frontmatter, body } = parseFrontmatter(doc);
     if (frontmatter?.import) {
-      importStatement = frontmatter.import;
+      // 从 frontmatter import 里提取 named exports，用 PACKAGE_NAME 重新生成。
+      // 这样换库后只改 config.ts 即可，不依赖 doc/ 里写的是哪个包名。
+      // 例: "import { Button, ButtonGroup } from '@old/react'" → 提取 ["Button", "ButtonGroup"]
+      const namedMatch = frontmatter.import.match(/import\s*\{([^}]+)\}/);
+      if (namedMatch) {
+        const members = namedMatch[1].split(',').map(s => s.trim()).filter(Boolean).join(', ');
+        importStatement = `import { ${members} } from '${PACKAGE_NAME}'`;
+      } else {
+        // 默认导入 / 命名空间导入：精确替换 from '...' 里的包名
+        importStatement = frontmatter.import.replace(
+          /(\bfrom\s+['"])[^'"]+(['"])/,
+          `$1${PACKAGE_NAME}$2`
+        );
+      }
     }
     description = extractDescription(body);
     rules = extractSection(body, '核心规则（AI 生成时必读）');

@@ -13,6 +13,7 @@
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMCPServer } from './server.js';
+import { LIBRARY_DISPLAY_NAME } from './config.js';
 
 async function main() {
   // 创建 MCP 服务器实例
@@ -31,6 +32,6 @@ async function main() {
 // 启动服务器
 main().catch((error) => {
   const errorMessage = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`my-design MCP Server (stdio) 启动失败: ${errorMessage}\n`);
+  process.stderr.write(`${LIBRARY_DISPLAY_NAME} MCP Server (stdio) 启动失败: ${errorMessage}\n`);
   process.exit(1);
 });

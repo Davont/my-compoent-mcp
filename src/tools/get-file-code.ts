@@ -8,6 +8,7 @@
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { resolvePackageRoot, readSourceFile } from '../utils/source-code-reader.js';
 import { removeFunctionBodies } from '../utils/remove-function-body.js';
+import { PACKAGE_NAME } from '../config.js';
 
 /**
  * 解析文件路径
@@ -52,15 +53,15 @@ export const getFileCodeTool: Tool = {
 可通过 fullCode 参数强制获取完整代码（包含函数体）。
 
 路径格式示例：
-- @my-design/react/Button/index.tsx
-- @my-design/react/Button/Button.tsx
-- @my-design/react/DatePicker/style/index.scss`,
+- ${PACKAGE_NAME}/Button/index.tsx
+- ${PACKAGE_NAME}/Button/Button.tsx
+- ${PACKAGE_NAME}/DatePicker/style/index.scss`,
   inputSchema: {
     type: 'object' as const,
     properties: {
       filePath: {
         type: 'string',
-        description: '文件完整路径，如 @my-design/react/Button/index.tsx',
+        description: `文件完整路径，如 ${PACKAGE_NAME}/Button/index.tsx`,
       },
       fullCode: {
         type: 'boolean',
@@ -98,7 +99,7 @@ export async function handleGetFileCode(
       content: [
         {
           type: 'text',
-          text: `错误：无效的文件路径格式。路径应为 @scope/package/path 格式。\n\n提供的路径: ${filePath}\n\n正确示例: @my-design/react/Button/index.tsx`,
+          text: `错误：无效的文件路径格式。路径应为 @scope/package/path 格式。\n\n提供的路径: ${filePath}\n\n正确示例: ${PACKAGE_NAME}/Button/index.tsx`,
         },
       ],
       isError: true,

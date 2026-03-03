@@ -17,6 +17,7 @@ import {
   extractFunction,
   getFunctionNames,
 } from '../utils/remove-function-body.js';
+import { PACKAGE_NAME } from '../config.js';
 
 /** 代码行数阈值，超过此行数才会过滤函数体 */
 const LINE_THRESHOLD = 500;
@@ -39,7 +40,7 @@ function isScriptFile(filePath: string): boolean {
 export const sourceInspectTool: Tool = {
   name: 'source_inspect',
   description:
-    '查看 @my-design/react 组件的源码。支持三种模式：\n' +
+    `查看 ${PACKAGE_NAME} 组件的源码。支持三种模式：\n` +
     '- list_files：列出组件的所有源码文件路径\n' +
     '- get_file：读取指定文件内容（大文件默认隐藏函数体，fullCode=true 显示完整代码）\n' +
     '- get_function：获取指定函数的完整实现\n\n' +
@@ -57,7 +58,7 @@ export const sourceInspectTool: Tool = {
       },
       filePath: {
         type: 'string',
-        description: '文件完整路径，如 @my-design/react/Button/index.tsx（get_file / get_function 模式必填）',
+        description: `文件完整路径，如 ${PACKAGE_NAME}/Button/index.tsx（get_file / get_function 模式必填）`,
       },
       functionName: {
         type: 'string',
@@ -69,7 +70,7 @@ export const sourceInspectTool: Tool = {
       },
       packageName: {
         type: 'string',
-        description: '包名，默认 @my-design/react',
+        description: `包名，默认 ${PACKAGE_NAME}`,
       },
     },
     required: ['mode'],
@@ -156,7 +157,7 @@ async function handleGetFile(args: Record<string, unknown>): Promise<CallToolRes
     return {
       content: [{
         type: 'text',
-        text: `无效的文件路径格式，应为 @scope/package/path。\n提供的路径: ${filePath}\n示例: @my-design/react/Button/index.tsx`,
+        text: `无效的文件路径格式，应为 @scope/package/path。\n提供的路径: ${filePath}\n示例: ${PACKAGE_NAME}/Button/index.tsx`,
       }],
       isError: true,
     };

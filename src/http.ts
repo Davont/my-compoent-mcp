@@ -16,6 +16,7 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMCPServer, getPackageVersion } from './server.js';
 import { tools } from './tools/index.js';
+import { LIBRARY_ID, LIBRARY_DISPLAY_NAME } from './config.js';
 
 // 会话存储：sessionId -> transport
 interface SessionInfo {
@@ -50,9 +51,9 @@ function parseArgs(): { port: number; host: string; stateless: boolean; timeout:
       i++;
     } else if (args[i] === '--help') {
       console.log(`
-my-design MCP Server (Streamable HTTP)
+${LIBRARY_DISPLAY_NAME} MCP Server (Streamable HTTP)
 
-Usage: my-design-mcp-http [options]
+Usage: ${LIBRARY_ID}-mcp-http [options]
 
 Options:
   --port, -p PORT       指定监听端口 (默认: 3000)
@@ -81,6 +82,7 @@ function cleanupSessions() {
   for (const [sessionId, info] of sessions) {
     if (now - info.lastActivity > SESSION_TIMEOUT) {
       sessions.delete(sessionId);
+      info.transport.close().catch(() => {});
     }
   }
 }
@@ -119,7 +121,7 @@ async function main() {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         status: 'ok',
-        name: 'my-design-mcp',
+        name: `${LIBRARY_ID}-mcp`,
         version,
         transport: 'streamable-http',
         stateless,
@@ -133,14 +135,33 @@ async function main() {
     if (url.pathname === '/mcp') {
       const sessionId = req.headers['mcp-session-id'] as string;
 
-      // 读取请求体
+    // 读取请求体（限制 1MB，防止超大请求拖垮进程）
+      const MAX_BODY_SIZE = 1024 * 1024;
       let body = '';
+      let bodySize = 0;
+      let bodyTooLarge = false;
+
       req.on('data', (chunk) => {
+        if (bodyTooLarge) return;
+        bodySize += chunk.length;
+        if (bodySize > MAX_BODY_SIZE) {
+          bodyTooLarge = true;
+          if (!res.headersSent) {
+            res.writeHead(413, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Request body too large' }));
+          }
+          req.destroy();
+          return;
+        }
         body += chunk.toString();
       });
       
       await new Promise<void>((resolve) => {
+        // 'close' 兜底：req.destroy() 后不会触发 'end'，需要靠 close/error 退出 Promise
+        req.on('close', resolve);
+        req.on('error', resolve);
         req.on('end', async () => {
+          if (bodyTooLarge) { resolve(); return; }
           try {
             let transport: StreamableHTTPServerTransport;
 
@@ -212,9 +233,9 @@ async function main() {
     if (url.pathname === '/' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        name: 'my-design-mcp',
+        name: `${LIBRARY_ID}-mcp`,
         version,
-        description: 'my-design MCP Server (Streamable HTTP)',
+        description: `${LIBRARY_DISPLAY_NAME} MCP Server (Streamable HTTP)`,
         transport: 'streamable-http',
         stateless,
         sessionTimeout: `${timeout} minutes`,
@@ -237,7 +258,7 @@ async function main() {
   httpServer.listen(port, host, () => {
     console.log(`
 ╔══════════════════════════════════════════════════════════════════════╗
-║           my-design MCP Server (Streamable HTTP) v${version.padEnd(10)}      ║
+║           ${LIBRARY_DISPLAY_NAME} MCP Server (Streamable HTTP) v${version.padEnd(10)}      ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║  监听地址: http://${host}:${port}                                      
 ║  模式: ${stateless ? '无状态 (Stateless)' : '有状态 (Stateful) '}                                        
@@ -249,12 +270,12 @@ async function main() {
 ║    GET    /health   健康检查                                         ║
 ║                                                                      ║
 ║  可用工具:                                                           ║
-║    - component_list      获取组件列表                                ║
+║    - get_context_bundle  获取组件上下文（核心工具）                  ║
 ║    - component_search    搜索组件                                    ║
 ║    - component_details   获取组件详情                                ║
-║    - component_examples  获取组件示例                                ║
 ║    - theme_tokens        获取 Design Token                           ║
 ║    - changelog_query     查询变更日志                                ║
+║    - source_inspect      查看组件源码                                ║
 ╚══════════════════════════════════════════════════════════════════════╝
 `);
   });
@@ -284,6 +305,6 @@ async function main() {
 
 main().catch((error) => {
   const errorMessage = error instanceof Error ? error.message : String(error);
-  console.error(`my-design MCP Server (Streamable HTTP) 启动失败: ${errorMessage}`);
+  console.error(`${LIBRARY_DISPLAY_NAME} MCP Server (Streamable HTTP) 启动失败: ${errorMessage}`);
   process.exit(1);
 });

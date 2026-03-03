@@ -6,13 +6,14 @@
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { getComponentList, ComponentIndexEntry } from '../utils/doc-reader.js';
+import { LIBRARY_DISPLAY_NAME } from '../config.js';
 
 /**
  * 工具定义
  */
 export const componentListTool: Tool = {
   name: 'component_list',
-  description: '获取 my-design 组件库的完整组件列表。适用于需要浏览所有可用组件的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具（支持 components 或 query 参数）。',
+  description: `获取 ${LIBRARY_DISPLAY_NAME} 组件库的完整组件列表。适用于需要浏览所有可用组件的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具（支持 components 或 query 参数）。`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -47,7 +48,7 @@ function formatComponentList(components: ComponentIndexEntry[]): string {
   }, {} as Record<string, ComponentIndexEntry[]>);
   
   const lines: string[] = [];
-  lines.push(`my-design 组件列表（共 ${components.length} 个组件）\n`);
+  lines.push(`${LIBRARY_DISPLAY_NAME} 组件列表（共 ${components.length} 个组件）\n`);
   
   for (const [category, comps] of Object.entries(grouped)) {
     lines.push(`## ${category}（${comps.length} 个）\n`);
