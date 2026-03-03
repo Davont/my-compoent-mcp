@@ -116,3 +116,16 @@
   - 代码生成：MCP 已有源码读取能力
 - **需要补充的能力**：待分析
 - **优先级**：低
+
+
+
+ 1. http 启动 banner 仍打印旧工具名，和真实注册不一致，容易误导。
+     http.ts:252
+  2. 注释写“公开 7 个工具”，实际是 6 个。
+     tools/index.ts:4
+  3. component_search 的无结果提示还让人去用 component_list（已不对外），文案过时。
+     component-search.ts:33
+  4. HTTP 请求体没有大小限制，内网也建议加上，避免异常大请求拖垮进程。
+     http.ts:136
+  5. 会话超时清理只 delete，未主动 transport.close()，长跑时会有资源回收风险。
+     http.ts:79
