@@ -129,3 +129,15 @@
      http.ts:136
   5. 会话超时清理只 delete，未主动 transport.close()，长跑时会有资源回收风险。
      http.ts:79
+
+
+     • 发现了 2 个需要关注的问题，按严重程度排序：
+
+  1. 中风险 路径校验可被符号链接绕过，仍可能读取 .octo 目录外文件
+     design-to-code.ts:195 只校验了解析后的字符串前缀，design-to-code.ts:227 直接 readFileSync。如果 .octo/<name>.json 是一个
+     symlink（指向目录外敏感文件），当前逻辑会通过并读取目标文件。
+     建议：读取前用 lstatSync 拒绝 symlink，或用 realpathSync 后再做“必须位于 octoDir 内”的校验。
+  2. 低风险 新增测试受外部环境变量 OCTO_DIR 污染，可能在某些机器上偶发失败
+     design-to-code.test.ts:8 的大部分用例默认依赖 process.cwd()/.octo，但文件开头没有统一清理外部 process.env.OCTO_DIR；且 design-to-
+     code.test.ts:164 只在一个 describe 内局部恢复。若运行环境预设了 OCTO_DIR，前面“默认路径”用例会跑到错误目录。
+     建议：在全文件 beforeAll/afterAll 中保存并临时清空 OCTO_DIR，仅在专门的 env 用例中设置它。

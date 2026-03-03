@@ -43,3 +43,11 @@ export const ENV_PACKAGE_ROOT = 'COMPONENT_PACKAGE_ROOT';
  * 待用户迁移完成后可删除此行
  */
 export const ENV_PACKAGE_ROOT_LEGACY = 'MY_DESIGN_PACKAGE_ROOT';
+
+/**
+ * 环境变量名，用于覆盖 .octo/ 目录的路径
+ * 默认值：process.cwd()/.octo
+ * 在 MCP 客户端 cwd 不确定的场景下，通过此变量指定设计稿目录
+ * 示例：OCTO_DIR=/Users/xxx/my-project/.octo
+ */
+export const ENV_OCTO_DIR = 'OCTO_DIR';

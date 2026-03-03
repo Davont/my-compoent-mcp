@@ -24,6 +24,8 @@ export {
   handleChangelogQuery,
   sourceInspectTool,
   handleSourceInspect,
+  designToCodeTool,
+  handleDesignToCode,
   // 内部工具 handler
   handleComponentList,
   handleComponentExamples,

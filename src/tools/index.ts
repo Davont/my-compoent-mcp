@@ -1,7 +1,7 @@
 /**
  * 工具注册
  *
- * 对外公开 6 个工具。旧工具 handler 保留可内部复用，但不注册到 MCP。
+ * 对外公开 7 个工具。旧工具 handler 保留可内部复用，但不注册到 MCP。
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
@@ -13,6 +13,7 @@ import { componentDetailsTool, handleComponentDetails } from './component-detail
 import { themeTokensTool, handleThemeTokens } from './theme-tokens.js';
 import { changelogQueryTool, handleChangelogQuery } from './changelog-query.js';
 import { sourceInspectTool, handleSourceInspect } from './source-inspect.js';
+import { designToCodeTool, handleDesignToCode } from './design-to-code.js';
 
 // 内部保留（不对外注册，供 get_context_bundle 等内部编排复用）
 import { handleComponentList } from './component-list.js';
@@ -33,6 +34,7 @@ export const tools: Tool[] = [
   themeTokensTool,
   changelogQueryTool,
   sourceInspectTool,
+  designToCodeTool,
 ];
 
 /**
@@ -48,6 +50,7 @@ export const toolHandlers: Record<
   [themeTokensTool.name]: handleThemeTokens,
   [changelogQueryTool.name]: handleChangelogQuery,
   [sourceInspectTool.name]: handleSourceInspect,
+  [designToCodeTool.name]: handleDesignToCode,
 };
 
 // 重新导出公开工具
@@ -64,6 +67,8 @@ export {
   handleChangelogQuery,
   sourceInspectTool,
   handleSourceInspect,
+  designToCodeTool,
+  handleDesignToCode,
   // 内部工具 handler 也导出，供外部直接 import 使用
   handleComponentList,
   handleComponentExamples,
