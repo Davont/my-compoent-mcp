@@ -33,6 +33,13 @@ export const LIBRARY_DISPLAY_NAME = 'my-design';
 export const PACKAGE_NAME = '@my-design/react';
 
 /**
+ * 默认 import 风格（当组件文档 frontmatter 未指定 import 时使用）
+ * - 'named':   import { Button } from '@my-design/react';
+ * - 'default': import Button from '@my-design/react/Button';
+ */
+export const DEFAULT_IMPORT_STYLE: 'named' | 'default' = 'default';
+
+/**
  * 环境变量名，用于覆盖组件库包的根目录路径
  * 修改此常量后，用户需同步更新本地 .env / shell 配置中的变量名
  */

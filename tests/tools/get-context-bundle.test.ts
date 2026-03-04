@@ -145,7 +145,8 @@ describe('get_context_bundle 数据源', () => {
       components: ['Button', 'Input', 'Select'],
     });
     const text = result.content[0].text;
-    expect(text).toContain('推荐 Imports');
+    expect(text).toContain('Imports（必须原样使用，禁止修改导入方式）');
+    expect(text).toContain('禁止自行更改导入路径或导入方式');
     expect(text).toContain("import { Button, Input, Select } from '@my-design/react';");
   });
 });

@@ -26,7 +26,7 @@ import {
   resolvePackageRoot,
   extractPropsFromDts,
 } from '../utils/source-code-reader.js';
-import { PACKAGE_NAME } from '../config.js';
+import { PACKAGE_NAME, DEFAULT_IMPORT_STYLE } from '../config.js';
 
 // ============ 内存缓存 ============
 
@@ -80,7 +80,9 @@ function getPackageRoot(): string | null {
 
 function buildComponentContext(name: string, depth: string, packageRoot: string | null): ComponentContext {
   const doc = readComponentDoc(name);
-  let importStatement = `import { ${name} } from '${PACKAGE_NAME}'`;
+  let importStatement = DEFAULT_IMPORT_STYLE === 'named'
+    ? `import { ${name} } from '${PACKAGE_NAME}';`
+    : `import ${name} from '${PACKAGE_NAME}/${name}';`;
   let description = '';
   let rules: string | null = null;
   let propsFromMd: string | null = null;
@@ -180,11 +182,12 @@ function formatOutput(
   lines.push(`# 组件上下文（共 ${components.length} 个组件）\n`);
 
   if (recommendedImports.length > 0) {
-    lines.push('## 推荐 Imports（放在文件顶部）\n');
+    lines.push('## Imports（必须原样使用，禁止修改导入方式）\n');
     lines.push('```ts');
     lines.push(...recommendedImports);
     lines.push('```');
     lines.push('');
+    lines.push('> **⚠️ 严格要求：必须使用上方提供的 import 语句，禁止自行更改导入路径或导入方式。**\n');
   }
 
   for (const c of components) {
@@ -227,14 +230,13 @@ function formatOutput(
       checklistItems.push(...ruleLines);
     }
   }
-  if (checklistItems.length > 0) {
-    lines.push('## Checklist（自动生成）\n');
-    for (const item of checklistItems) {
-      const text = item.trim().replace(/^-\s*/, '');
-      lines.push(`- [ ] ${text}`);
-    }
-    lines.push('');
+  checklistItems.unshift('- import 语句与上方提供的完全一致，未自行修改导入方式');
+  lines.push('## Checklist（自动生成）\n');
+  for (const item of checklistItems) {
+    const text = item.trim().replace(/^-\s*/, '');
+    lines.push(`- [ ] ${text}`);
   }
+  lines.push('');
 
   if (notFound.length > 0) {
     const allComponents = getComponentList();
