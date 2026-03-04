@@ -253,9 +253,9 @@ describe('extractDescription', () => {
 // 组件列表 / 搜索
 // ========================
 describe('getComponentList', () => {
-  it('返回全部 5 个组件', () => {
+  it('返回全部 6 个组件', () => {
     const list = getComponentList();
-    expect(list.length).toBe(5);
+    expect(list.length).toBe(6);
     const names = list.map(c => c.name);
     expect(names).toContain('Button');
     expect(names).toContain('Input');

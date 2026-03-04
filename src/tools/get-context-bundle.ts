@@ -21,6 +21,7 @@ import {
   extractDescription,
   getComponentList,
   searchComponentsWithCategoryExpansion,
+  readAiRules,
 } from '../utils/doc-reader.js';
 import {
   resolvePackageRoot,
@@ -180,6 +181,13 @@ function formatOutput(
   const recommendedImports = collectRecommendedImports(components);
 
   lines.push(`# 组件上下文（共 ${components.length} 个组件）\n`);
+
+  const aiRules = readAiRules();
+  if (aiRules) {
+    lines.push('## 通用规则（必须遵守）\n');
+    lines.push(aiRules);
+    lines.push('');
+  }
 
   if (recommendedImports.length > 0) {
     lines.push('## Imports（必须原样使用，禁止修改导入方式）\n');

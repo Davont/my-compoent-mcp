@@ -47,6 +47,17 @@
       "since": "1.1.0"
     },
     {
+      "name": "Form",
+      "aliases": ["表单"],
+      "category": "form",
+      "status": "stable",
+      "keywords": ["表单", "提交", "校验", "验证", "form", "validate", "submit"],
+      "docPath": "components/form.md",
+      "figma": "",
+      "tokens": ["--md-color-primary", "--md-color-danger", "--md-spacing-sm", "--md-spacing-md"],
+      "since": "1.0.0"
+    },
+    {
       "name": "Tooltip",
       "aliases": ["提示", "气泡提示", "文字提示"],
       "category": "display",

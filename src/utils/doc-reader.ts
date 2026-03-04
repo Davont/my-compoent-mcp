@@ -393,21 +393,33 @@ export function readThemes(): ThemesFile {
 export function readGuidelineDoc(guidelineName: string): string | null {
   const docPath = getDocPath();
   const index = readDocIndex();
-  
-  const guideline = index.guidelines.find(g => 
+
+  const guideline = index.guidelines.find(g =>
     g.name.toLowerCase() === guidelineName.toLowerCase()
   );
-  
+
   if (!guideline) {
     return null;
   }
-  
+
   const filePath = join(docPath, guideline.docPath);
   if (!existsSync(filePath)) {
     return null;
   }
-  
+
   return readFileSync(filePath, 'utf-8');
+}
+
+/**
+ * 读取 AI 通用规则（doc/guidelines/ai-rules.md）
+ */
+export function readAiRules(): string | null {
+  const docPath = getDocPath();
+  const filePath = join(docPath, 'guidelines/ai-rules.md');
+  if (!existsSync(filePath)) {
+    return null;
+  }
+  return readFileSync(filePath, 'utf-8').trim();
 }
 
 /**
