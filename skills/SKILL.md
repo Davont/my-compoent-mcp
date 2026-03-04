@@ -12,13 +12,13 @@
 
 | 工具 | 用途 | 关键参数 |
 |------|------|---------|
-| `component_list` | 查看所有组件 | `category`, `status` |
-| `component_search` | 搜索组件 | `query` |
-| `component_details` | 获取组件详情 | `brief`, `sections`, `propFilter` |
-| `component_examples` | 获取代码示例 | `exampleName` |
+| `get_context_bundle` | 聚合获取多组件完整上下文（Props + 规则 + 示例）。**生成页面代码时优先用此工具** | `components`, `query`, `depth` |
+| `component_search` | 按关键词搜索组件名称 | `query` |
+| `component_details` | 获取单个组件的文档详情 | `brief`, `sections`, `propFilter` |
 | `theme_tokens` | 获取设计 token | `type`, `theme` |
 | `changelog_query` | 查询变更日志 | `version`, `page`, `keyword` |
-| `get_code_block` | 获取被隐藏的代码块 | `componentName`, `codeBlockIndex` |
+| `source_inspect` | 读取组件源码文件或函数实现 | `mode`, `componentName` |
+| `design_to_code` | 读取设计稿 DSL/HTML 数据（.octo/ 目录） | `file`, `outputMode` |
 
 ---
 
@@ -28,7 +28,20 @@
 
 **不要一次性拉取大量数据。** 按照"概览 → 定位 → 精读"的节奏调用工具。
 
-### 了解一个组件（2 步）
+### 生成页面代码（推荐路径）
+
+```
+1. get_context_bundle(components: ['Button', 'Input'])
+   → 一次获取多个组件的 Props + 核心规则（默认 summary 深度）
+
+2. 如需示例代码：get_context_bundle(components: [...], depth: 'full')
+   → 额外包含全部示例
+
+3. 如需按关键词查找：get_context_bundle(query: '表单')
+   → 自动匹配相关组件并返回上下文
+```
+
+### 了解单个组件（2 步）
 
 ```
 1. component_details(componentName, brief: true)
@@ -36,18 +49,7 @@
 
 2. 根据用户问题，决定下一步：
    - 需要某个 Prop → component_details(sections: ['props'], propFilter: ['onClick'])
-   - 需要示例代码 → component_examples(componentName)（先看目录）
    - 需要使用规则 → component_details(sections: ['rules'])
-```
-
-### 获取代码示例（2 步）
-
-```
-1. component_examples(componentName)
-   → 不传 exampleName，返回示例目录（名称+描述，不含代码）
-
-2. component_examples(componentName, exampleName: '基础用法')
-   → 只返回指定示例的完整代码
 ```
 
 ### 问具体属性
@@ -74,10 +76,29 @@ changelog_query(keyword: 'Button')
 → 按关键词搜索
 ```
 
+### 查看组件源码
+
+```
+source_inspect(mode: 'list_files', componentName: 'Button')
+→ 列出组件文件列表
+
+source_inspect(mode: 'get_file', componentName: 'Button', filePath: '...')
+→ 读取指定文件内容
+```
+
+### 读取设计稿数据
+
+```
+design_to_code()
+→ 省略 file 参数，列出 .octo/ 下所有可用文件
+
+design_to_code(file: 'home', outputMode: 'dsl')
+→ 读取 home.json 的 DSL 数据
+```
+
 ### 禁止行为
 
 - **禁止** 调用 `component_details(sections: ['all'])`，除非用户明确要求完整文档
-- **禁止** 直接使用 `component_examples` 返回的目录内容作为代码（目录不含代码）
 - **禁止** 编造不存在的 Props 或组件 API
 - **禁止** 硬编码颜色/间距值（必须使用 token，通过 `theme_tokens` 查询）
 
@@ -87,7 +108,7 @@ changelog_query(keyword: 'Button')
 
 生成代码时必须遵循以下规则：
 
-1. **必须先调用 `component_details`** 获取 Props 和核心规则
+1. **优先调用 `get_context_bundle`** 一次性获取所需组件的 Props 和核心规则
 2. **颜色/间距/圆角** 必须使用 design token（CSS 变量），禁止硬编码
-3. **遵守核心规则** — component_details 返回的 `rules` 章节是强约束
-4. **引入方式** 以 component_details 返回的 `import` 为准
+3. **遵守核心规则** — `get_context_bundle` / `component_details` 返回的 `rules` 章节是强约束
+4. **引入方式** 以工具返回的 `import` 为准
