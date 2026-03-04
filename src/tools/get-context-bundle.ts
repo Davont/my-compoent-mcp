@@ -37,6 +37,8 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_QUERY_MAX_COMPONENTS = 8;
+const MAX_QUERY_MAX_COMPONENTS = 50;
 
 function getCacheKey(components: string[], depth: string): string {
   return `${[...components].sort().join(',')}|${depth}`;
@@ -181,7 +183,8 @@ function formatOutput(
   components: ComponentContext[],
   notFound: string[],
   truncated: boolean,
-  depth: string
+  depth: string,
+  maxComponents: number
 ): string {
   const lines: string[] = [];
   const recommendedImports = collectRecommendedImports(components);
@@ -252,7 +255,7 @@ function formatOutput(
   }
 
   if (truncated) {
-    lines.push('---\n> 结果已截断（最多 5 个组件）。使用 `components` 参数精确指定需要的组件。');
+    lines.push(`---\n> 结果已截断（最多 ${maxComponents} 个组件）。使用 \`components\` 参数精确指定需要的组件。`);
   }
 
   return lines.join('\n');
@@ -281,6 +284,11 @@ export const getContextBundleTool: Tool = {
         type: 'string',
         description: '搜索关键词，如 "表单"、"弹窗"。自动匹配相关组件并返回上下文。',
       },
+      maxComponents: {
+        type: 'integer',
+        description:
+          `query 模式的最大返回组件数（可配置）。默认 ${DEFAULT_QUERY_MAX_COMPONENTS}，最大 ${MAX_QUERY_MAX_COMPONENTS}。`,
+      },
       depth: {
         type: 'string',
         description:
@@ -301,6 +309,7 @@ export async function handleGetContextBundle(
     : undefined;
   const query = typeof args?.query === 'string' ? args.query : undefined;
   const depth = ((args?.depth as string) ?? 'summary').toLowerCase().trim();
+  const rawMaxComponents = args?.maxComponents;
 
   if ((!components || components.length === 0) && !query) {
     return {
@@ -309,10 +318,21 @@ export async function handleGetContextBundle(
     };
   }
 
+  if (components && components.length > 0 && rawMaxComponents !== undefined) {
+    return {
+      content: [{
+        type: 'text',
+        text: 'maxComponents 仅在 query 模式生效；传了 components 时请移除 maxComponents',
+      }],
+      isError: true,
+    };
+  }
+
   try {
     let targetNames: string[];
     let notFound: string[] = [];
     let truncated = false;
+    let maxComponents = DEFAULT_QUERY_MAX_COMPONENTS;
 
     if (components && components.length > 0) {
       // 路径 A：components 直传
@@ -354,7 +374,29 @@ export async function handleGetContextBundle(
       }
     } else {
       // 路径 B：query 搜索
-      const searchResult = searchComponentsWithCategoryExpansion(query!);
+      if (rawMaxComponents !== undefined) {
+        if (typeof rawMaxComponents !== 'number' || !Number.isInteger(rawMaxComponents)) {
+          return {
+            content: [{
+              type: 'text',
+              text: 'maxComponents 必须是整数（仅 query 模式生效）',
+            }],
+            isError: true,
+          };
+        }
+        if (rawMaxComponents < 1 || rawMaxComponents > MAX_QUERY_MAX_COMPONENTS) {
+          return {
+            content: [{
+              type: 'text',
+              text: `maxComponents 必须在 1 到 ${MAX_QUERY_MAX_COMPONENTS} 之间`,
+            }],
+            isError: true,
+          };
+        }
+        maxComponents = rawMaxComponents;
+      }
+
+      const searchResult = searchComponentsWithCategoryExpansion(query!, maxComponents);
       if (searchResult.results.length === 0) {
         const allComponents = getComponentList();
         const available = allComponents.map(c => c.name).join(', ');
@@ -372,7 +414,7 @@ export async function handleGetContextBundle(
 
     // 缓存 key：components 路径排序（顺序无关），query 路径用 query 本身
     const baseKey = query && (!components || components.length === 0)
-      ? `q:${query}|${depth}`
+      ? `q:${query}|${depth}|max:${maxComponents}`
       : getCacheKey(targetNames, depth);
     const cacheKey = baseKey +
       (notFound.length > 0 ? `|nf:${notFound.join(',')}` : '') +
@@ -390,7 +432,7 @@ export async function handleGetContextBundle(
       buildComponentContext(name, depth, packageRoot)
     );
 
-    const output = formatOutput(contexts, notFound, truncated, depth);
+    const output = formatOutput(contexts, notFound, truncated, depth, maxComponents);
     setCache(cacheKey, output);
 
     return {

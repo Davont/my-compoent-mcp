@@ -41,6 +41,16 @@ describe('get_context_bundle 参数处理', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('未找到任何指定组件');
   });
+
+  it('components 与 maxComponents 同时传入返回 isError（避免静默忽略）', async () => {
+    const result = await handleGetContextBundle({
+      components: ['Button'],
+      maxComponents: 2,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('maxComponents');
+    expect(result.content[0].text).toContain('query');
+  });
 });
 
 // ============ query 搜索 ============
@@ -77,6 +87,21 @@ describe('get_context_bundle query 搜索', () => {
     const text = result.content[0].text;
     expect(text).toContain('未找到');
     expect(text).toContain('可用组件');
+  });
+
+  it('maxComponents 可配置，限制 query 返回数量', async () => {
+    const result = await handleGetContextBundle({ query: '表单', maxComponents: 2 });
+    expect(result.isError).toBeUndefined();
+    const text = result.content[0].text;
+    expect(text).toContain('共 2 个组件');
+    expect(text).toContain('结果已截断（最多 2 个组件）');
+    expect(text).not.toContain('## Select');
+  });
+
+  it('maxComponents 非法时返回 isError', async () => {
+    const result = await handleGetContextBundle({ query: '表单', maxComponents: 0 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('maxComponents');
   });
 });
 
