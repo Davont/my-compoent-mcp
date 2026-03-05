@@ -12,46 +12,21 @@
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, readdirSync, readFileSync } from 'fs';
-import { join, resolve, basename, sep, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join, resolve, basename, sep } from 'path';
 import { transform, TransformMode } from '../transform/index.js';
 import { handleGetContextBundle } from './get-context-bundle.js';
 import { ENV_OCTO_DIR, DEFAULT_OUTPUT_MODE } from '../config.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 // 只允许文件名中出现字母、数字、连字符、下划线，防止路径穿越
 const SAFE_FILENAME_RE = /^[\w-]+$/;
 
 /**
- * 从 startDir 向上查找包含 package.json 的目录（即项目根目录）
- */
-function findProjectRoot(startDir: string): string | null {
-  let dir = startDir;
-  for (let i = 0; i < 10; i++) {
-    if (existsSync(join(dir, 'package.json'))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
-/**
  * 获取 .octo/ 目录的绝对路径
- * 优先级：环境变量 OCTO_DIR > 项目根目录（从 __dirname 向上找 package.json）> process.cwd()
+ * 优先级：环境变量 OCTO_DIR > process.cwd()/.octo
  */
 function getOctoDir(): string {
   const envDir = process.env[ENV_OCTO_DIR];
   if (envDir) return envDir;
-
-  const projectRoot = findProjectRoot(__dirname);
-  if (projectRoot) {
-    const octo = join(projectRoot, '.octo');
-    if (existsSync(octo)) return octo;
-  }
-
   return join(process.cwd(), '.octo');
 }
 
@@ -194,7 +169,8 @@ export async function handleDesignToCode(
     return {
       content: [{
         type: 'text',
-        text: `未找到 .octo/ 目录（查找路径：${octoDir}）。\n请在项目根目录创建 .octo/ 目录并放入设计稿 JSON 文件。`,
+        text: `未找到 .octo/ 目录（查找路径：${octoDir}）。\n` +
+          `请设置环境变量 OCTO_DIR 指向 .octo 目录的绝对路径，例如：OCTO_DIR=/path/to/project/.octo`,
       }],
       isError: true,
     };
