@@ -108,26 +108,40 @@ function formatTransformOutput(
 export const designToCodeTool: Tool = {
   name: 'design_to_code',
   description:
-    '读取项目根目录 .octo/ 下的设计稿 JSON 文件，转换为简化 DSL 或 HTML，\n' +
-    '供 AI 结合 get_context_bundle 工具生成符合 my-design 规范的页面代码。\n\n' +
-    '两种使用方式：\n' +
-    '- 不传 file 参数：列出 .octo/ 下所有可用设计稿文件\n' +
-    '- 传 file 参数：读取并转换指定设计稿，返回 DSL 或 HTML\n\n' +
-    '推荐流程：先调用此工具获取设计稿数据，再调用 get_context_bundle 获取组件上下文，最后生成代码。',
+    '将 Octo 设计稿转换为 AI 可直接消费的结构化数据，用于生成符合 my-design 组件规范的页面代码。\n\n' +
+    '## 能力\n' +
+    '1. 读取 .octo/ 目录下的 Octo 导出 JSON\n' +
+    '2. 通过布局引擎自动推断 flex 布局（方向、对齐、间距、margin/padding）和 CSS 样式\n' +
+    '3. 输出精简 DSL（字段缩写、颜色转 hex、去单位、省略默认值，token 消耗约为原始 JSON 的 40%）或语义化 HTML\n' +
+    '4. 自动识别设计稿中使用的 my-design 组件（Button、Input、Modal 等），并联动 get_context_bundle 返回对应的 Props 和使用规范\n\n' +
+    '## 使用方式\n' +
+    '- 不传 file：列出 .octo/ 下所有可用文件名\n' +
+    '- 传 file：转换指定设计稿，返回 DSL/HTML + 组件规范（如有匹配）\n\n' +
+    '## DSL 输出格式说明\n' +
+    '- id: 顺序整数 | type: 节点类型 | w/h: 宽高\n' +
+    '- layout: { direction, align, justify, gap, ml/mt/mr/mb, pl/pt/pr/pb }\n' +
+    '- styles: { bg, border, radius, shadow, color, size, weight, leading }\n' +
+    '- TEXT 节点额外有 text 字段（显示文本）\n' +
+    '- INSTANCE 节点对应组件库组件，name 字段包含组件名\n\n' +
+    '## 推荐流程\n' +
+    '当用户要求"根据设计稿生成代码"时：\n' +
+    '1. 调用 design_to_code({ file: "index" }) 获取设计稿 DSL + 组件规范\n' +
+    '2. 根据 DSL 中的布局结构和组件规范，直接生成 React 页面代码\n' +
+    '3. 如需补充组件信息，调用 get_context_bundle 获取更多细节',
   inputSchema: {
     type: 'object',
     properties: {
       file: {
         type: 'string',
         description:
-          '要读取的设计稿文件名（不含 .json 扩展名），如 "home"、"detail"。' +
-          '省略时列出 .octo/ 下所有可用文件。',
+          '设计稿文件名（不含 .json 扩展名），如 "index"、"home"、"detail"。' +
+          '省略时列出 .octo/ 下所有可用文件。通常使用 "index"。',
       },
       outputMode: {
         type: 'string',
         enum: ['dsl', 'html'],
         description:
-          '转换输出格式：dsl（简化 DSL，推荐，token 消耗少）或 html（完整 HTML 结构）。默认 dsl。',
+          '输出格式。dsl: 精简 JSON（推荐，token 少，结构清晰）；html: 语义化 HTML（带内联样式）。默认 dsl。',
       },
     },
   },
