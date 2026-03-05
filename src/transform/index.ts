@@ -53,11 +53,18 @@ export function transform(json: unknown, mode: TransformMode): TransformResult {
   if (_testOverride !== null) return _testOverride;
 
   let tree: LayoutNode | null = null;
+  const _log = console.log;
+  const _warn = console.warn;
   try {
+    console.log = () => {};
+    console.warn = () => {};
     const result = processDesign(json);
     tree = result?.tree ?? null;
   } catch (err) {
-    console.warn('[design_to_code] processDesign failed, falling back to raw JSON:', err instanceof Error ? err.message : err);
+    _warn('[design_to_code] processDesign failed, falling back to raw JSON:', err instanceof Error ? err.message : err);
+  } finally {
+    console.log = _log;
+    console.warn = _warn;
   }
 
   if (!tree) {
