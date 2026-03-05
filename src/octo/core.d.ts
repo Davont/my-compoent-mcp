@@ -372,6 +372,14 @@ export function renderLayoutToHtml(node: LayoutNode, options?: RenderOptions): s
 export function renderAbsoluteToHtml(node: LayoutNode, options?: RenderOptions): string;
 export function renderHtmlWithClasses(node: LayoutNode, options: { classNameMap: Map<string, string[]>; sharedClasses: Map<string, Record<string, string>>; includeLabels?: boolean }): string;
 
+export interface RenderPageResult {
+  html: string;
+  css: string;
+  fullCss: string;
+}
+export function renderLayoutPageWithCss(node: LayoutNode, options?: RenderPageOptions): RenderPageResult;
+export function renderLayoutPage(node: LayoutNode, options?: RenderPageOptions): string;
+
 export type IssueSeverity = "info" | "warning" | "error";
 export type LayoutIssueType = "BACKGROUND_OUT_OF_BOUNDS" | "SIBLING_OVERLAP" | "INCONSISTENT_SPACING" | "UNIFIED_GAP_SUGGESTED" | "FULL_COVER_LAYER" | "DEVICE_FRAME_PARALLEL_CONTENT" | "CHILD_OVERFLOW" | "MISSING_GROUP" | "MERGE_SUGGESTION" | "SAME_GEOMETRY_SIBLINGS";
 

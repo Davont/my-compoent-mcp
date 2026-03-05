@@ -243,8 +243,10 @@ describe('transform 布局引擎集成', () => {
     expect(result.content).not.toContain('data-design-root');
   });
 
-  it('HTML 输出包含 class 属性（来自 core.js renderLayoutToHtml）', () => {
+  it('HTML 输出为完整页面（含 <!doctype>、<style>、class 属性）', () => {
     const result = transform(MINIMAL_FIGMA_JSON, 'html');
+    expect(result.content).toContain('<!doctype html>');
+    expect(result.content).toContain('<style>');
     expect(result.content).toContain('class=');
     expect(result.content).toContain('layout-root');
   });

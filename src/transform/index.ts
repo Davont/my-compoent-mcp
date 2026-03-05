@@ -11,7 +11,7 @@
  *   export function transform(json: unknown, mode: TransformMode): TransformResult
  */
 
-import { processDesign, compressDSL, toJsonString, renderLayoutToHtml } from '../octo/core.js';
+import { processDesign, compressDSL, toJsonString, renderLayoutPageWithCss } from '../octo/core.js';
 import type { LayoutNode, CompressOptions } from '../octo/core.js';
 import { getComponentList, type ComponentIndexEntry } from '../utils/doc-reader.js';
 
@@ -73,9 +73,14 @@ export function transform(json: unknown, mode: TransformMode): TransformResult {
     const recommendedComponents = extractRecommendedComponents(tree);
 
     if (mode === 'html') {
+      const pageResult = renderLayoutPageWithCss(tree, {
+        classMode: 'semantic',
+        semanticTags: true,
+        enableDedup: true,
+      });
       return {
         mode: 'html',
-        content: renderLayoutToHtml(tree, { classMode: 'semantic', semanticTags: true }),
+        content: pageResult.html,
         recommendedComponents,
       };
     }
