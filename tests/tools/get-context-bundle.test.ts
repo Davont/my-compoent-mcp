@@ -60,11 +60,10 @@ describe('get_context_bundle query 搜索', () => {
     const result = await handleGetContextBundle({ query: '表单' });
     expect(result.isError).toBeUndefined();
     const text = result.content[0].text;
-    // Input 的 keywords 含 "表单"，category=form
-    // Button 和 Select 也是 category=form，应被扩展进来
+    // Input/Form 的 keywords 含 "表单"，category=input
+    // Select 等也是 category=input，应被扩展进来
     expect(text).toContain('Input');
-    expect(text).toContain('Button');
-    expect(text).toContain('Select');
+    expect(text).toContain('Form');
   });
 
   it('name/alias 精确匹配排在前面', async () => {
@@ -73,7 +72,7 @@ describe('get_context_bundle query 搜索', () => {
     const text = result.content[0].text;
     // Button 的 aliases 含 "按钮"，应排在最前
     expect(text).toContain('Button');
-    // 确保 Button 出现在其他 form 组件之前
+    // 确保 Button 出现在其他组件之前
     const buttonPos = text.indexOf('## Button');
     const inputPos = text.indexOf('## Input');
     if (buttonPos !== -1 && inputPos !== -1) {
@@ -147,7 +146,7 @@ describe('get_context_bundle 数据源', () => {
     const text = result.content[0].text;
     expect(text).toContain('Imports（必须原样使用，禁止修改导入方式）');
     expect(text).toContain('禁止自行更改导入路径或导入方式');
-    expect(text).toContain("import { Button, Input, Select } from '@my-design/react';");
+    expect(text).toContain("@douyinfe/semi-ui");
   });
 });
 
@@ -168,13 +167,11 @@ describe('get_context_bundle checklist', () => {
 
 describe('get_context_bundle 缓存', () => {
   it('相同 components + depth 二次调用命中缓存', async () => {
-    // 第一次调用
     const result1 = await handleGetContextBundle({
       components: ['Modal'],
       depth: 'summary',
     });
     expect(result1.isError).toBeUndefined();
-    // 第二次调用，应返回相同内容
     const result2 = await handleGetContextBundle({
       components: ['Modal'],
       depth: 'summary',

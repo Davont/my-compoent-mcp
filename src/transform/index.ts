@@ -24,6 +24,10 @@ export interface TransformResult {
   content: string;
   /** 设计稿中识别出的 my-design 组件名列表，如 ["Button", "Input", "Modal"] */
   recommendedComponents?: string[];
+  /** HTML 模式专用：独立 CSS（含 base styles + 组件样式） */
+  css?: string;
+  /** HTML 模式专用：JSX body（已做 class→className 转换，可直接放入 React 组件 return） */
+  jsx?: string;
 }
 
 // ======================== 测试钩子 ========================
@@ -74,13 +78,20 @@ export function transform(json: unknown, mode: TransformMode): TransformResult {
 
     if (mode === 'html') {
       const pageResult = renderLayoutPageWithCss(tree, {
-        classMode: 'semantic',
+        classMode: 'tailwind',
         semanticTags: true,
         enableDedup: true,
+        includeNodeId: false,
       });
+
+      const css = cleanCssForReact(pageResult.fullCss);
+      const jsx = htmlBodyToJsx(pageResult.html);
+
       return {
         mode: 'html',
-        content: pageResult.html,
+        content: `/* --- CSS --- */\n${css}\n\n/* --- JSX --- */\n${jsx}`,
+        css,
+        jsx,
         recommendedComponents,
       };
     }
@@ -95,6 +106,39 @@ export function transform(json: unknown, mode: TransformMode): TransformResult {
     console.log = _log;
     console.warn = _warn;
   }
+}
+
+// ======================== HTML → React 转换 ========================
+
+/**
+ * 从完整 HTML 页面中提取 body 内的 DOM，转换为 JSX 兼容格式。
+ * - class= → className=
+ * - 去掉 <div id="layout-container"> 外壳
+ */
+function htmlBodyToJsx(html: string): string {
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (!bodyMatch) return html.replace(/ class=/g, ' className=');
+
+  let body = bodyMatch[1]
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .trim();
+
+  const containerMatch = body.match(
+    /^<div\s+id="layout-container"\s+class="([^"]*)">([\s\S]*)<\/div>$/
+  );
+  if (containerMatch) {
+    const rootClasses = containerMatch[1];
+    body = `<div className="${rootClasses}">${containerMatch[2]}</div>`;
+  }
+
+  return body.replace(/ class=/g, ' className=');
+}
+
+/**
+ * 清理 CSS：去掉 body 规则（React 项目不需要 body margin/padding）
+ */
+function cleanCssForReact(fullCss: string): string {
+  return fullCss.replace(/body\s*\{[^}]*\}\n?/g, '').trim();
 }
 
 // ======================== 降级（引擎失败时） ========================

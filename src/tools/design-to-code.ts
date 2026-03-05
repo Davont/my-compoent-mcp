@@ -2,8 +2,8 @@
  * design_to_code 工具
  *
  * 读取项目根目录 .octo/ 下的设计稿 JSON 文件，调用 transform 函数转换为
- * 简化 DSL 或 HTML，供 AI 结合 get_context_bundle 工具生成符合
- * my-design 规范的页面代码。
+ * 简化 DSL 或 React 脚手架（CSS + JSX），供 AI 结合 get_context_bundle
+ * 工具生成符合组件库规范的页面代码。
  *
  * 两种使用方式：
  * - 不传 file：列出 .octo/ 下所有可用的设计稿文件名
@@ -59,34 +59,61 @@ function formatFileList(files: string[]): string {
   return lines.join('\n');
 }
 
+interface FormatOptions {
+  fileName: string;
+  outputMode: TransformMode;
+  content: string;
+  css?: string;
+  jsx?: string;
+  componentBundle?: string | null;
+  recommendedComponents?: string[];
+}
+
 /**
  * 格式化转换结果输出
  */
-function formatTransformOutput(
-  fileName: string,
-  outputMode: TransformMode,
-  content: string,
-  componentBundle?: string | null,
-  recommendedComponents?: string[]
-): string {
+function formatTransformOutput(opts: FormatOptions): string {
+  const { fileName, outputMode, content, css, jsx, componentBundle, recommendedComponents } = opts;
   const lines: string[] = [];
-  const modeLabel = outputMode === 'html' ? 'HTML' : '简化 DSL';
+  const modeLabel = outputMode === 'html' ? 'React 脚手架' : '简化 DSL';
   lines.push(`# 设计稿数据已就绪（${modeLabel} 模式）\n`);
   lines.push(`文件：${fileName}.json`);
   lines.push(`输出格式：${outputMode}\n`);
 
-  if (outputMode === 'html') {
-    lines.push('## 设计稿 HTML（仅供参考）\n');
+  if (outputMode === 'html' && css && jsx) {
+    lines.push('## 文件 1：styles.css（直接复制，禁止修改）\n');
+    lines.push('```css');
+    lines.push(css);
+    lines.push('```\n');
+    lines.push('## 文件 2：Page.tsx（直接复制，禁止修改）\n');
+    lines.push('```tsx');
+    lines.push("import React from 'react';");
+    lines.push("import './styles.css';\n");
+    lines.push('export default function Page() {');
+    lines.push('  return (');
+    lines.push(`    ${jsx}`);
+    lines.push('  );');
+    lines.push('}');
+    lines.push('```\n');
+    lines.push('## 执行步骤（必须严格按顺序）\n');
+    lines.push('### 第一步：原封不动复制\n');
+    lines.push('将以上两个文件**逐字复制**到项目中，确认页面可正常渲染。');
+    lines.push('- 禁止修改任何 CSS 类名和样式值');
+    lines.push('- 禁止修改 DOM 结构和标签层级');
+    lines.push('- 禁止删除或合并任何元素\n');
+    lines.push('### 第二步：按需改造（在第一步基础上）\n');
+    lines.push('在已能正常运行的代码上，做以下**小范围**调整：');
+    lines.push('1. **替换组件**：将匹配的 `<div>`/`<span>` 替换为下方识别到的组件库组件（如 `<Switch>`、`<Button>`），保留原有 className');
+    lines.push('2. **语义化类名**：将 `n-33-xxx` 等自动生成的类名重命名为语义化名称（如 `status-bar`、`card-title`），CSS 中同步修改');
+    lines.push('3. **添加交互**：为按钮、表单等元素添加 onClick、onChange 等事件处理');
+    lines.push('4. **数据绑定**：将硬编码的文本替换为 props 或 state 变量');
+    lines.push('');
+    lines.push('> 每次只改一处，改完确认不影响渲染后再改下一处。');
+  } else if (outputMode === 'html') {
+    lines.push('## 设计稿 HTML\n');
     lines.push('```html');
     lines.push(content);
     lines.push('```');
-    lines.push('');
-    lines.push('## 转写要求\n');
-    lines.push('以上 HTML 是设计稿的视觉参考，**禁止直接复制到代码中**。你需要：');
-    lines.push('1. 转写为 React JSX 组件，使用普通 CSS 文件管理样式');
-    lines.push('2. 将 inline style 提取为语义化的 CSS class（如 `.header`、`.title`、`.card`）');
-    lines.push('3. 使用语义化标签（`header`、`section`、`h1` 等）替代无意义的 `div`');
-    lines.push('4. 尺寸单位根据需要转换（px → rem 或响应式布局）');
   } else {
     lines.push('## 设计稿 DSL\n');
     lines.push('```json');
@@ -96,20 +123,20 @@ function formatTransformOutput(
     lines.push('> DSL 字段：id=顺序编号, type=节点类型, w/h=宽高, text=文本内容, name=组件名');
     lines.push('> layout: direction/align/justify/gap/ml/mt/mr/mb/pl/pt/pr/pb');
     lines.push('> styles: bg/border/radius/shadow/color/size/weight/leading');
-    lines.push('> INSTANCE 节点对应 my-design 组件');
+    lines.push('> INSTANCE 节点对应组件库组件');
   }
 
   lines.push('');
   lines.push('---');
   lines.push('## 组件识别结果\n');
   if (recommendedComponents && recommendedComponents.length > 0) {
-    lines.push(`识别到的 my-design 组件：${recommendedComponents.map(c => `\`${c}\``).join('、')}`);
+    lines.push(`识别到的组件库组件：${recommendedComponents.map(c => `\`${c}\``).join('、')}`);
     lines.push('');
-    lines.push('⚠️ **只有以上列出的组件才能从 @my-design/react 导入。** DSL 中的其他 name（如 StatusBar、TitleBar 等）是设计稿图层名，不是组件库组件，必须用普通 HTML/CSS（div、span 等）实现。');
+    lines.push('⚠️ **只有以上列出的组件才能从组件库导入。** 其他 name（如 StatusBar、TitleBar 等）是设计稿图层名，不是组件库组件，必须用普通 HTML/CSS（div、span 等）实现。');
   } else {
-    lines.push('未识别到 my-design 组件。');
+    lines.push('未识别到组件库组件。');
     lines.push('');
-    lines.push('⚠️ **不要从 @my-design/react 导入任何组件。** DSL 中的 name 字段是设计稿图层名，不是组件库组件名。全部使用普通 HTML/CSS 实现。');
+    lines.push('⚠️ **不要从组件库导入任何组件。** name 字段是设计稿图层名，不是组件库组件名。全部使用普通 HTML/CSS 实现。');
   }
 
   if (componentBundle) {
@@ -135,9 +162,9 @@ export const designToCodeTool: Tool = {
   name: 'design_to_code',
   description:
     '【设计稿转代码的唯一入口】当用户提到 .octo、index.json、设计稿、Figma、Octo，或要求"转化/转换/生成 前端页面代码"时，必须首先调用本工具。' +
-    '无需先调用 get_context_bundle 或 component_search，本工具已内置 my-design 组件识别和规范获取。\n\n' +
+    '无需先调用 get_context_bundle 或 component_search，本工具已内置组件识别和规范获取。\n\n' +
     '⚠️ 禁止用 read_file 直接读取 .octo/ 下的 JSON 文件（文件极大，会浪费 token）。直接调用本工具即可，工具内部自动读取、解析、转换。\n\n' +
-    '将 .octo/ 目录下的设计稿 JSON 转换为精简 DSL 或语义化 HTML，自动推断 flex 布局和 CSS 样式，识别 my-design 组件并联动返回 Props 规范。\n\n' +
+    '将 .octo/ 目录下的设计稿 JSON 转换为精简 DSL 或 React 脚手架（CSS + JSX），自动推断 flex 布局和 CSS 样式，识别组件库组件并联动返回 Props 规范。\n\n' +
     '- 不传 file：列出 .octo/ 下所有可用文件名\n' +
     '- 传 file + outputMode：转换指定设计稿，返回结构化数据 + 组件规范（如有匹配）\n\n' +
     '流程：design_to_code({ file: "index" }) → 拿到设计稿数据 + 组件规范 → 直接生成 React 代码',
@@ -154,7 +181,7 @@ export const designToCodeTool: Tool = {
         type: 'string',
         enum: ['dsl', 'html'],
         description:
-          `输出格式。html: 语义化 HTML（AI 可直接理解布局结构）；dsl: 精简 JSON（token 少）。默认 ${DEFAULT_OUTPUT_MODE}。`,
+          `输出格式。html: React 脚手架（CSS 文件 + JSX 组件，可直接复制使用）；dsl: 精简 JSON（token 少）。默认 ${DEFAULT_OUTPUT_MODE}。`,
       },
     },
   },
@@ -294,7 +321,15 @@ export async function handleDesignToCode(
     }
   }
 
-  const output = formatTransformOutput(file, result.mode, result.content, componentBundle, recommended);
+  const output = formatTransformOutput({
+    fileName: file,
+    outputMode: result.mode,
+    content: result.content,
+    css: result.css,
+    jsx: result.jsx,
+    componentBundle,
+    recommendedComponents: recommended,
+  });
   return {
     content: [{ type: 'text', text: output }],
   };

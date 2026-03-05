@@ -22,14 +22,14 @@ describe('component_list 参数校验', () => {
   });
 
   it('正确的 category 过滤', async () => {
-    const result = await handleComponentList({ category: 'form' });
+    const result = await handleComponentList({ category: 'input' });
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('Button');
+    expect(result.content[0].text).toContain('Input');
   });
 
   it('正确的 status 过滤', async () => {
-    const result = await handleComponentList({ status: 'beta' });
+    const result = await handleComponentList({ status: 'stable' });
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('Tooltip');
+    expect(result.content[0].text).toContain('Button');
   });
 });

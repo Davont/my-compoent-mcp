@@ -1,0 +1,409 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Layout Render</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 16px;
+        }
+
+        .layout-root {
+            position: relative;
+        }
+
+        .layout-node {
+            box-sizing: border-box;
+            flex-shrink: 0;
+        }
+
+        /* 组合类：flex方向 + 交叉轴对齐 */
+        .flex-row-start {
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+        }
+
+        .flex-row-center {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+        }
+
+        .flex-row-end {
+            display: flex;
+            flex-direction: row;
+            align-items: flex-end;
+        }
+
+        .flex-col-start {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .flex-col-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .flex-col-end {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+
+        /* 主轴对齐（较少使用，保留单独类） */
+        .justify-center {
+            justify-content: center;
+        }
+
+        .justify-end {
+            justify-content: flex-end;
+        }
+
+        .justify-between {
+            justify-content: space-between;
+        }
+
+        /* 按钮重置并默认居中 */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            border: none;
+            padding: 0;
+            background: none;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+        }
+
+        /* 图片/图标占位背景 - 纯灰色，与背景渐变区分 */
+        .type-image,
+        .type-icon,
+        .type-vector {
+            background: #d1d5db !important;
+            border-radius: 4px;
+        }
+
+        /* 共享样式类 */
+        .s-729846 {
+            gap: 16px;
+        }
+
+        .s-5f323d {
+            font-size: 24px;
+            font-weight: 400;
+            line-height: 24px;
+            color: rgba(0, 0, 0, 0.90);
+        }
+
+        .s-02dea1 {
+            font-size: 16px;
+            font-weight: 500;
+            line-height: 1.0;
+            color: rgba(0, 0, 0, 0.90);
+        }
+
+        .s-467fcc {
+            font-size: 14px;
+            font-weight: 400;
+            line-height: 1.0;
+            color: rgba(0, 0, 0, 0.60);
+        }
+
+        .s-729851 {
+            gap: 13px;
+        }
+
+        .s-325489 {
+            width: 192px;
+            height: 1px;
+            background: rgba(0, 0, 0, 0.20);
+        }
+
+        .s-505cc7 {
+            width: 112px;
+            height: 1px;
+            margin-left: 192px;
+            background: rgba(0, 0, 0, 0.20);
+        }
+
+        .s-431033 {
+            width: 12px;
+            height: 24px;
+        }
+
+        .s-27c91c {
+            gap: 156px;
+            margin-top: 10px;
+        }
+
+        .s-66cb10 {
+            gap: 2px;
+        }
+
+        .n-33-943 {
+            width: 360px;
+            height: 792px;
+        }
+
+        .n-33-2792 {
+            width: 360px;
+            height: 792px;
+            padding: 8px 16px 10px 16px;
+            background: rgb(241, 243, 245);
+        }
+
+        .n-split-33-2792-0-group {
+            gap: 175px;
+            margin-left: 8px;
+        }
+
+        .n-33-3391 {
+            font-size: 15px;
+            font-weight: 500;
+            line-height: 20px;
+            color: rgba(0, 0, 0, 0.90);
+        }
+
+        .n-rel-33-3392 {
+            gap: 5px;
+        }
+
+        .n-33-3412 {
+            width: 15px;
+            height: 12px;
+            background: rgb(255, 255, 255);
+        }
+
+        .n-33-3439 {
+            width: 22px;
+            height: 12px;
+        }
+
+        .n-33-3405 {
+            width: 18px;
+            height: 12px;
+        }
+
+        .n-33-3393 {
+            width: 26px;
+            height: 13px;
+            background: rgba(0, 0, 0, 0.10);
+            border: 1px solid rgba(0, 0, 0, 0.90);
+        }
+
+        .n-rel-33-945 {
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .n-33-3657 {
+            width: 40px;
+            height: 40px;
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 1000px;
+        }
+
+        .n-33-3663 {
+            font-size: 20px;
+            font-weight: 700;
+            line-height: 27px;
+            color: rgba(0, 0, 0, 0.90);
+        }
+
+        .n-33-946 {
+            width: 328px;
+            height: 64px;
+            gap: 155px;
+            padding: 20px 12px 20px 12px;
+            margin-top: 16px;
+            background: rgb(255, 255, 255);
+            border-radius: 20px;
+        }
+
+        .n-33-947 {
+            width: 328px;
+            height: 184px;
+            padding: 18px 12px 14px 12px;
+            margin-top: 12px;
+            background: rgb(255, 255, 255);
+            border-radius: 20px;
+        }
+
+        .n-rel-33-3560 {
+            margin-top: 10px;
+        }
+
+        .n-33-3564 {
+            margin-top: 2px;
+            font-size: 14px;
+            font-weight: 400;
+            line-height: 1.0;
+            color: rgba(0, 0, 0, 0.60);
+        }
+
+        .n-33-3562 {
+            width: 192px;
+            height: 1px;
+            margin-top: 10px;
+            background: rgba(0, 0, 0, 0.20);
+        }
+
+        .n-rel-33-3565 {
+            gap: 20px;
+            margin-top: -45px;
+            margin-left: 192px;
+        }
+
+        .n-33-3567 {
+            width: 112px;
+            height: 1px;
+            background: rgba(0, 0, 0, 0.20);
+        }
+
+        .n-33-951 {
+            width: 328px;
+            height: 120px;
+            padding: 18px 12px 14px 12px;
+            margin-top: 12px;
+            background: rgb(255, 255, 255);
+            border-radius: 20px;
+        }
+
+        .n-33-955 {
+            width: 328px;
+            height: 56px;
+            gap: 128px;
+            padding: 4px 12px 4px 12px;
+            margin-top: 12px;
+            background: rgb(255, 255, 255);
+            border-radius: 20px;
+        }
+
+        .n-33-3464 {
+            font-size: 16px;
+            font-weight: 500;
+            line-height: 1.0;
+            color: rgb(251, 101, 34);
+        }
+
+        .n-33-3466 {
+            width: 112px;
+            height: 48px;
+        }
+
+        .n-33-959 {
+            width: 328px;
+            height: 64px;
+            gap: 196px;
+            padding: 20px 12px 20px 12px;
+            margin-top: 12px;
+            background: rgb(255, 255, 255);
+            border-radius: 20px;
+        }
+
+        .n-33-3459 {
+            width: 36px;
+            height: 20px;
+            margin-top: 2px;
+            background: rgb(251, 101, 34);
+            border-radius: 12px;
+        }
+
+        .n-33-3151 {
+            width: 112px;
+            height: 5px;
+            margin-top: 141px;
+            margin-left: 108px;
+            background: rgba(0, 0, 0, 0.20);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="layout-container" class="layout-root">
+        <div class="n-33-943 layout-node flex-row-start">
+            <div class="n-33-2792 layout-node flex-col-start">
+                <div class="n-split-33-2792-0-group layout-node flex-row-center"><span
+                        class="n-33-3391 layout-node text">08:08</span>
+                    <div class="n-rel-33-3392 layout-node flex-row-start"><span class="n-33-3412 layout-node icon"
+                            role="img"></span><span class="n-33-3439 layout-node type-icon icon" role="img"></span><span
+                            class="n-33-3405 layout-node type-icon icon" role="img"></span><span
+                            class="n-33-3393 layout-node icon" role="img"></span></div>
+                </div>
+                <div class="n-rel-33-945 layout-node flex-row-center"><button
+                        class="n-33-3657 layout-node btn"></button><span class="n-33-3663 layout-node text">服药设置</span>
+                </div>
+                <div class="n-33-946 layout-node flex-row-center">
+                    <div class="s-729846 layout-node flex-row-start"><span
+                            class="s-5f323d layout-node text">󰊮</span><span
+                            class="s-02dea1 layout-node text">任务目标</span></div><span class="s-467fcc layout-node text">2
+                        次/天</span>
+                </div>
+                <div class="n-33-947 layout-node flex-col-start">
+                    <div class="s-729851 layout-node flex-col-start"><span class="s-02dea1 layout-node text">计划
+                            08:00</span><span class="s-325489 layout-node vector" role="img"></span></div><span
+                        class="s-505cc7 layout-node vector" role="img"></span>
+                    <div class="n-rel-33-3560 layout-node flex-col-start"><span
+                            class="s-02dea1 layout-node text">复合维生素</span><span class="n-33-3564 layout-node text">1
+                            粒，温水服用，饭后</span><span class="n-33-3562 layout-node vector" role="img"></span></div>
+                    <div class="n-rel-33-3565 layout-node flex-col-end"><span
+                            class="s-431033 layout-node type-icon icon" role="img"></span><span
+                            class="n-33-3567 layout-node vector" role="img"></span></div>
+                    <div class="s-27c91c layout-node flex-row-center">
+                        <div class="s-66cb10 layout-node flex-col-start"><span
+                                class="s-02dea1 layout-node text">钙镁片</span><span class="s-467fcc layout-node text">1
+                                粒，温水服用，饭后</span></div><span class="s-431033 layout-node type-icon icon"
+                            role="img"></span>
+                    </div>
+                </div>
+                <div class="n-33-951 layout-node flex-col-start">
+                    <div class="s-729851 layout-node flex-col-start"><span class="s-02dea1 layout-node text">计划
+                            18:00</span><span class="s-325489 layout-node vector" role="img"></span></div><span
+                        class="s-505cc7 layout-node vector" role="img"></span>
+                    <div class="s-27c91c layout-node flex-row-center">
+                        <div class="s-66cb10 layout-node flex-col-start"><span
+                                class="s-02dea1 layout-node text">钙镁片</span><span class="s-467fcc layout-node text">1
+                                粒，温水服用，饭后</span></div><span class="s-431033 layout-node type-icon icon"
+                            role="img"></span>
+                    </div>
+                </div>
+                <div class="n-33-955 layout-node flex-row-center"><span class="n-33-3464 layout-node text">添加服药</span>
+                    <div class="n-33-3466 layout-node"></div>
+                </div>
+                <div class="n-33-959 layout-node flex-row-start">
+                    <div class="s-729846 layout-node flex-row-start"><span
+                            class="s-5f323d layout-node text">󰇕</span><span class="s-02dea1 layout-node text">提醒</span>
+                    </div><span class="n-33-3459 layout-node icon" role="img"></span>
+                </div>
+                <div class="n-33-3151 layout-node"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var designWidth = 360;
+            var container = document.getElementById('layout-container');
+            function updateScale() {
+                var deviceWidth = window.innerWidth - 32; // 减去 body padding
+                var scale = Math.min(deviceWidth / designWidth, 1);
+                container.style.transform = 'scale(' + scale + ')';
+                container.style.transformOrigin = 'top left';
+            }
+            updateScale();
+            window.addEventListener('resize', updateScale);
+        })();
+    </script>
+</body>
+
+</html>

@@ -28,11 +28,8 @@ export declare function getCompressionStats(original: LayoutNode, compressed: Co
  *
  * @example
  * ```ts
- * const result = processDesign(figmaJson, {
- *   flattenMode: 'smart',
- *   clusterAlgorithm: 'dbscan',
- *   generateStyles: true,
- * });
+ * const result = processDesign(figmaJson);
+ * // 默认：full 扁平化 + styled-only 容器回填
  * console.log(result.tree);
  * ```
  */
@@ -309,6 +306,8 @@ export interface ProcessDesignOptions {
 	removeOccluded?: boolean;
 	autoSort?: boolean;
 	flattenMode?: "full" | "smart" | "preserve-groups";
+	/** 容器回填策略（仅 full 模式生效）：全部 / 仅有视觉样式 / 不回填 */
+	containerRecoveryMode?: "all" | "styled-only" | "none";
 	clusterAlgorithm?: "row-based" | "dbscan";
 	dbscanEps?: number | "auto";
 	gapThresholdX?: number;
@@ -328,6 +327,8 @@ export interface ProcessDesignResult {
 		preprocessed: LayoutNode | null;
 		/** 扁平化后 */
 		flattened: LayoutNode | null;
+		/** 容器回填后（仅 full 模式，其他模式等于 flattened） */
+		recovered: LayoutNode | null;
 		/** 聚类后 */
 		clustered: LayoutNode | null;
 		/** 切割后 */
@@ -358,6 +359,8 @@ export interface RenderOptions {
 	enableDedup?: boolean;
 	/** 启用语义化标签推断：根据 type 和 name 使用合适的 HTML 标签，默认 true */
 	semanticTags?: boolean;
+	/** 输出 data-node-id 属性，默认 true（精度测试需要），打包产物可关闭 */
+	includeNodeId?: boolean;
 }
 export interface RenderPageOptions extends RenderOptions {
 	title?: string;
@@ -366,20 +369,6 @@ export interface RenderPageOptions extends RenderOptions {
 	/** 外部 CSS 链接 */
 	cssLink?: string;
 }
-// ============ HTML 渲染 ============
-
-export function renderLayoutToHtml(node: LayoutNode, options?: RenderOptions): string;
-export function renderAbsoluteToHtml(node: LayoutNode, options?: RenderOptions): string;
-export function renderHtmlWithClasses(node: LayoutNode, options: { classNameMap: Map<string, string[]>; sharedClasses: Map<string, Record<string, string>>; includeLabels?: boolean }): string;
-
-export interface RenderPageResult {
-  html: string;
-  css: string;
-  fullCss: string;
-}
-export function renderLayoutPageWithCss(node: LayoutNode, options?: RenderPageOptions): RenderPageResult;
-export function renderLayoutPage(node: LayoutNode, options?: RenderPageOptions): string;
-
 export type IssueSeverity = "info" | "warning" | "error";
 export type LayoutIssueType = "BACKGROUND_OUT_OF_BOUNDS" | "SIBLING_OVERLAP" | "INCONSISTENT_SPACING" | "UNIFIED_GAP_SUGGESTED" | "FULL_COVER_LAYER" | "DEVICE_FRAME_PARALLEL_CONTENT" | "CHILD_OVERFLOW" | "MISSING_GROUP" | "MERGE_SUGGESTION" | "SAME_GEOMETRY_SIBLINGS";
 

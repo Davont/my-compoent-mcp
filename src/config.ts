@@ -6,7 +6,6 @@
  * 换库时需同步修改：
  * - 此文件的所有常量
  * - package.json 的 name、bin 字段、keywords
- * - doc/ 目录下各组件 .md 文件中的 import 示例代码（grep "@my-design/react" 全局替换）
  */
 
 /**
@@ -19,25 +18,40 @@
  * ⚠️  修改此值后需同步更新 package.json 的 bin 字段（无法自动同步）：
  *   "bin": { "${LIBRARY_ID}-mcp": "...", "${LIBRARY_ID}-mcp-http": "..." }
  */
-export const LIBRARY_ID = 'my-design';
+export const LIBRARY_ID = 'semi-design';
 
 /**
  * 组件库展示名，用于日志、工具描述等纯文案场景
  * 可以是任意可读字符串
  */
-export const LIBRARY_DISPLAY_NAME = 'my-design';
+export const LIBRARY_DISPLAY_NAME = 'Semi Design';
 
 /**
- * 组件库 React npm 包名，用于 import 语句默认值、source_inspect 等
+ * 组件库 React npm 包名
+ *
+ * Semi Design 统一使用 @douyinfe/semi-ui 包名。
  */
-export const PACKAGE_NAME = '@my-design/react';
+export const PACKAGE_NAME = '@douyinfe/semi-ui';
 
 /**
  * 默认 import 风格（当组件文档 frontmatter 未指定 import 时使用）
- * - 'named':   import { Button } from '@my-design/react';
- * - 'default': import Button from '@my-design/react/Button';
+ * - 'named':   import { Button } from '@douyinfe/semi-ui';
+ * - 'default': import Button from '@douyinfe/semi-ui';
+ *
+ * Semi Design 统一使用 named export
  */
-export const DEFAULT_IMPORT_STYLE: 'named' | 'default' = 'default';
+export const DEFAULT_IMPORT_STYLE: 'named' | 'default' = 'named';
+
+/**
+ * 文档子目录名
+ *
+ * 指定 doc/ 下的子目录作为文档根，用于同仓库维护多套组件库文档。
+ * - 空字符串 ''：直接使用 doc/（my-design）
+ * - 'semi'：使用 doc/semi/
+ *
+ * 可通过环境变量 DOC_SUBDIR 覆盖
+ */
+export const DOC_SUBDIR = 'semi';
 
 /**
  * 环境变量名，用于覆盖组件库包的根目录路径
@@ -64,4 +78,4 @@ export const ENV_OCTO_DIR = 'OCTO_DIR';
  * - 'html': 语义化 HTML（AI 可直接理解布局，推荐弱模型）
  * - 'dsl':  精简 JSON（token 少，适合强模型）
  */
-export const DEFAULT_OUTPUT_MODE: 'html' | 'dsl' = 'dsl';
+export const DEFAULT_OUTPUT_MODE: 'html' | 'dsl' = 'html';

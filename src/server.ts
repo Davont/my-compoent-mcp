@@ -179,8 +179,8 @@ export function createMCPServer(): Server {
               mimeType: 'application/json',
               text: JSON.stringify(
                 {
-                  guidelines: index.guidelines,
-                  count: index.guidelines.length,
+                  guidelines: index.guidelines ?? [],
+                  count: index.guidelines?.length ?? 0,
                   description: `${LIBRARY_DISPLAY_NAME} 设计规范目录`,
                 },
                 null,

@@ -1,0 +1,136 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-03-05",
+  "components": [
+    {
+      "name": "Button",
+      "aliases": ["Btn", "按钮"],
+      "category": "basic",
+      "status": "stable",
+      "keywords": ["button", "submit", "action", "click", "loading", "按钮", "提交"],
+      "docPath": "components/button.md",
+      "tokens": ["--semi-color-primary", "--semi-color-danger", "--semi-border-radius-small"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Input",
+      "aliases": ["输入框", "TextInput"],
+      "category": "input",
+      "status": "stable",
+      "keywords": ["input", "text", "form", "password", "textarea", "输入", "输入框", "文本", "表单"],
+      "docPath": "components/input.md",
+      "tokens": ["--semi-color-primary", "--semi-color-text-0", "--semi-border-radius-small"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Select",
+      "aliases": ["选择器", "Picker"],
+      "category": "input",
+      "status": "stable",
+      "keywords": ["select", "dropdown", "option", "picker", "选择", "下拉"],
+      "docPath": "components/select.md",
+      "tokens": ["--semi-color-primary", "--semi-color-bg-2", "--semi-border-radius-small"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Form",
+      "aliases": ["表单"],
+      "category": "input",
+      "status": "stable",
+      "keywords": ["form", "field", "validate", "submit", "表单", "校验", "提交"],
+      "docPath": "components/form.md",
+      "tokens": ["--semi-color-primary", "--semi-color-danger"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Checkbox",
+      "aliases": ["复选框", "多选"],
+      "category": "input",
+      "status": "stable",
+      "keywords": ["checkbox", "check", "multiple", "复选", "多选", "勾选"],
+      "docPath": "components/checkbox.md",
+      "tokens": ["--semi-color-primary", "--semi-color-bg-2"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Switch",
+      "aliases": ["开关", "Toggle"],
+      "category": "input",
+      "status": "stable",
+      "keywords": ["switch", "toggle", "on", "off", "开关", "切换"],
+      "docPath": "components/switch.md",
+      "tokens": ["--semi-color-primary", "--semi-color-bg-2"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Radio",
+      "aliases": ["单选框", "单选"],
+      "category": "input",
+      "status": "stable",
+      "keywords": ["radio", "option", "single", "单选", "选择"],
+      "docPath": "components/radio.md",
+      "tokens": ["--semi-color-primary", "--semi-color-bg-2"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Modal",
+      "aliases": ["对话框", "Dialog", "弹窗"],
+      "category": "show",
+      "status": "stable",
+      "keywords": ["modal", "dialog", "popup", "overlay", "confirm", "alert", "模态", "对话框", "弹窗"],
+      "docPath": "components/modal.md",
+      "tokens": ["--semi-color-bg-0", "--semi-shadow-elevated", "--semi-border-radius-medium"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Table",
+      "aliases": ["表格", "DataTable"],
+      "category": "show",
+      "status": "stable",
+      "keywords": ["table", "grid", "data", "list", "sort", "filter", "表格", "数据", "排序"],
+      "docPath": "components/table.md",
+      "tokens": ["--semi-color-bg-0", "--semi-color-border", "--semi-color-fill-0"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Tooltip",
+      "aliases": ["工具提示", "Tip"],
+      "category": "show",
+      "status": "stable",
+      "keywords": ["tooltip", "tip", "hover", "popup", "提示", "悬浮提示", "文字提示"],
+      "docPath": "components/tooltip.md",
+      "tokens": ["--semi-color-bg-4", "--semi-color-text-0", "--semi-border-radius-small"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Card",
+      "aliases": ["卡片", "CardPanel"],
+      "category": "show",
+      "status": "stable",
+      "keywords": ["card", "container", "panel", "content", "卡片", "容器", "面板"],
+      "docPath": "components/card.md",
+      "tokens": ["--semi-color-bg-0", "--semi-shadow-elevated", "--semi-border-radius-medium"],
+      "since": "1.21.0"
+    },
+    {
+      "name": "Dropdown",
+      "aliases": ["下拉菜单", "DropdownMenu"],
+      "category": "show",
+      "status": "stable",
+      "keywords": ["dropdown", "menu", "action", "context", "下拉", "菜单", "操作"],
+      "docPath": "components/dropdown.md",
+      "tokens": ["--semi-color-bg-0", "--semi-color-text-0", "--semi-shadow-elevated"],
+      "since": "0.1.0"
+    },
+    {
+      "name": "Tabs",
+      "aliases": ["标签栏", "TabPanel"],
+      "category": "navigation",
+      "status": "stable",
+      "keywords": ["tabs", "tab", "panel", "switch", "navigation", "标签", "标签栏", "切换"],
+      "docPath": "components/tabs.md",
+      "tokens": ["--semi-color-primary", "--semi-color-text-2", "--semi-color-border"],
+      "since": "0.1.0"
+    }
+  ]
+}

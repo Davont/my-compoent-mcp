@@ -177,13 +177,13 @@ describe('design_to_code 读取转换', () => {
     expect(dsl).toHaveProperty('id');
   });
 
-  it('outputMode=html 返回 HTML 内容', async () => {
+  it('outputMode=html 返回 React 脚手架', async () => {
     const result = await handleDesignToCode({ file: TEST_FILE_HOME, outputMode: 'html' });
     expect(result.isError).toBeUndefined();
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
-    expect(first.text).toContain('HTML');
     expect(first.text).toContain('html');
+    expect(first.text).toContain('styles.css');
   });
 
   it('无推荐组件时包含不要导入组件的警告', async () => {
@@ -209,10 +209,10 @@ describe('transform 函数接口', () => {
     expect(Array.isArray(result.recommendedComponents)).toBe(true);
   });
 
-  it('任意 JSON 输入 html 模式返回有效 HTML', () => {
+  it('任意 JSON 输入 html 模式返回有效内容', () => {
     const result = transform({ test: 1 }, 'html');
     expect(result.mode).toBe('html');
-    expect(result.content).toContain('<div');
+    expect(result.content).toContain('div');
   });
 });
 
@@ -234,21 +234,25 @@ describe('transform 布局引擎集成', () => {
     expect(content).toContain('"text"');
   });
 
-  it('有效 Figma JSON 的 html 模式返回语义化 HTML', () => {
+  it('有效 Figma JSON 的 html 模式返回 JSX 格式', () => {
     const result = transform(MINIMAL_FIGMA_JSON, 'html');
     expect(result.mode).toBe('html');
-    expect(result.content).toContain('<div');
-    expect(result.content).toContain('<span');
-    expect(result.content).toContain('</div>');
-    expect(result.content).not.toContain('data-design-root');
+    expect(result.jsx).toBeDefined();
+    expect(result.jsx).toContain('className=');
+    expect(result.jsx).toContain('<div');
+    expect(result.jsx).toContain('<span');
+    expect(result.jsx).not.toContain('data-design-root');
   });
 
-  it('HTML 输出为完整页面（含 <!doctype>、<style>、class 属性）', () => {
+  it('HTML 模式拆分出独立 CSS 和 JSX', () => {
     const result = transform(MINIMAL_FIGMA_JSON, 'html');
-    expect(result.content).toContain('<!doctype html>');
-    expect(result.content).toContain('<style>');
-    expect(result.content).toContain('class=');
-    expect(result.content).toContain('layout-root');
+    expect(result.css).toBeDefined();
+    expect(result.jsx).toBeDefined();
+    expect(result.css).toContain('layout-node');
+    expect(result.css).toContain('flex-row');
+    expect(result.jsx).toContain('className=');
+    expect(result.jsx).not.toContain(' class=');
+    expect(result.jsx).toContain('layout-root');
   });
 
   it('识别出 INSTANCE 节点中的组件名', () => {

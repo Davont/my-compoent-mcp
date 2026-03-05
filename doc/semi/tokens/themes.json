@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.0",
+  "themes": [
+    {
+      "name": "light",
+      "tokens": {
+        "--semi-color-primary": "rgba(var(--semi-blue-5), 1)",
+        "--semi-color-primary-hover": "rgba(var(--semi-blue-6), 1)",
+        "--semi-color-primary-active": "rgba(var(--semi-blue-7), 1)",
+        "--semi-color-danger": "rgba(var(--semi-red-5), 1)",
+        "--semi-color-warning": "rgba(var(--semi-orange-5), 1)",
+        "--semi-color-success": "rgba(var(--semi-green-5), 1)",
+        "--semi-color-text-0": "rgba(var(--semi-grey-9), 1)",
+        "--semi-color-text-1": "rgba(var(--semi-grey-7), 1)",
+        "--semi-color-text-2": "rgba(var(--semi-grey-5), 1)",
+        "--semi-color-text-3": "rgba(var(--semi-grey-3), 1)",
+        "--semi-color-bg-0": "rgba(var(--semi-white), 1)",
+        "--semi-color-bg-1": "rgba(var(--semi-white), 1)",
+        "--semi-color-bg-2": "rgba(var(--semi-grey-0), 1)",
+        "--semi-color-bg-3": "rgba(var(--semi-grey-1), 1)",
+        "--semi-color-bg-4": "rgba(var(--semi-grey-9), 1)",
+        "--semi-color-border": "rgba(var(--semi-grey-2), 1)",
+        "--semi-color-fill-0": "rgba(var(--semi-grey-0), 1)",
+        "--semi-color-fill-1": "rgba(var(--semi-grey-1), 1)",
+        "--semi-color-fill-2": "rgba(var(--semi-grey-2), 1)"
+      }
+    },
+    {
+      "name": "dark",
+      "tokens": {
+        "--semi-color-primary": "rgba(var(--semi-blue-5), 1)",
+        "--semi-color-primary-hover": "rgba(var(--semi-blue-4), 1)",
+        "--semi-color-primary-active": "rgba(var(--semi-blue-3), 1)",
+        "--semi-color-danger": "rgba(var(--semi-red-5), 1)",
+        "--semi-color-warning": "rgba(var(--semi-orange-5), 1)",
+        "--semi-color-success": "rgba(var(--semi-green-5), 1)",
+        "--semi-color-text-0": "rgba(255, 255, 255, 0.9)",
+        "--semi-color-text-1": "rgba(255, 255, 255, 0.7)",
+        "--semi-color-text-2": "rgba(255, 255, 255, 0.5)",
+        "--semi-color-text-3": "rgba(255, 255, 255, 0.35)",
+        "--semi-color-bg-0": "#1C1F23",
+        "--semi-color-bg-1": "#2C2F33",
+        "--semi-color-bg-2": "#35383D",
+        "--semi-color-bg-3": "#41444A",
+        "--semi-color-bg-4": "#E8E8E8",
+        "--semi-color-border": "rgba(255, 255, 255, 0.08)",
+        "--semi-color-fill-0": "rgba(255, 255, 255, 0.06)",
+        "--semi-color-fill-1": "rgba(255, 255, 255, 0.1)",
+        "--semi-color-fill-2": "rgba(255, 255, 255, 0.16)"
+      }
+    }
+  ]
+}

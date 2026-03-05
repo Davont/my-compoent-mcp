@@ -7,18 +7,23 @@
 import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { DOC_SUBDIR } from '../config.js';
 
 // 获取当前文件的目录路径
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
- * 获取 doc/ 目录的路径
- * 支持开发环境和生产环境
+ * 获取文档根目录的路径
+ *
+ * 支持通过 config.DOC_SUBDIR 或环境变量 DOC_SUBDIR 指定子目录：
+ * - ''        → doc/
+ * - 'shadcn'  → doc/shadcn/
  */
 function getDocPath(): string {
-  // 尝试多种路径（rslib 打包会内联代码，__dirname 可能指向不同位置）
-  const possiblePaths = [
+  const subdir = process.env.DOC_SUBDIR || DOC_SUBDIR;
+
+  const possibleBases = [
     // 打包后内联到 dist/*.js: dist/ -> ../doc
     join(__dirname, '../doc'),
     // 打包后作为单独文件 dist/utils/doc-reader.js: dist/utils/ -> ../../doc
@@ -27,13 +32,15 @@ function getDocPath(): string {
     join(__dirname, '../../doc'),
   ];
   
-  for (const p of possiblePaths) {
+  for (const base of possibleBases) {
+    const p = subdir ? join(base, subdir) : base;
     if (existsSync(p)) {
       return p;
     }
   }
-  
-  throw new Error(`doc/ 目录不存在，已尝试路径: ${possiblePaths.join(', ')}`);
+
+  const triedPaths = possibleBases.map(b => subdir ? join(b, subdir) : b);
+  throw new Error(`doc/ 目录不存在，已尝试路径: ${triedPaths.join(', ')}`);
 }
 
 // ============ 类型定义 ============
@@ -49,6 +56,8 @@ export interface ComponentIndexEntry {
   figma?: string;
   tokens?: string[];
   since?: string;
+  install?: string;
+  dependencies?: string[];
 }
 
 /** 规范索引条目 */
@@ -63,13 +72,14 @@ export interface DocIndex {
   schemaVersion: string;
   generatedAt: string;
   components: ComponentIndexEntry[];
-  guidelines: GuidelineIndexEntry[];
+  guidelines?: GuidelineIndexEntry[];
 }
 
 /** 组件文档 frontmatter */
 export interface ComponentFrontmatter {
   name: string;
   import?: string;
+  install?: string;
   category: string;
   status: string;
   since?: string;
@@ -78,6 +88,7 @@ export interface ComponentFrontmatter {
   figma?: string;
   tokens?: string[];
   source?: string;
+  dependencies?: string[];
 }
 
 /** Token 定义 */
@@ -394,7 +405,7 @@ export function readGuidelineDoc(guidelineName: string): string | null {
   const docPath = getDocPath();
   const index = readDocIndex();
 
-  const guideline = index.guidelines.find(g =>
+  const guideline = index.guidelines?.find(g =>
     g.name.toLowerCase() === guidelineName.toLowerCase()
   );
 

@@ -1600,6 +1600,68 @@ function flatten(node, options = {}) {
 		default: return smartFlatten(node);
 	}
 }
+var COLLECTABLE_TYPES = new Set([
+	"FRAME",
+	"GROUP",
+	"SECTION",
+	"INSTANCE",
+	"COMPONENT",
+	"COMPONENT_SET"
+]);
+function checkVisualStyles(node) {
+	const hasFills = Array.isArray(node.fills) && node.fills.some((f) => f.visible !== false);
+	const hasStrokes = Array.isArray(node.strokes) && node.strokes.some((s) => s.visible !== false);
+	const hasCorner = !!(node.cornerRadius && node.cornerRadius > 0) || !!node.borderRadius;
+	return hasFills || hasStrokes || hasCorner;
+}
+function collectContainers(tree) {
+	const containerMap = /* @__PURE__ */ new Map();
+	const containerStack = [];
+	function traverse(node, isRoot) {
+		if (LEAF_TYPES.has(node.type)) return new Set([node.id]);
+		if (!node.children || node.children.length === 0) {
+			if (CONTAINER_TYPES.has(node.type)) return /* @__PURE__ */ new Set();
+			return new Set([node.id]);
+		}
+		const isCollectable = !isRoot && COLLECTABLE_TYPES.has(node.type);
+		const parentContainerId = isCollectable ? containerStack.length > 0 ? containerStack[containerStack.length - 1] : null : null;
+		if (isCollectable) containerStack.push(node.id);
+		const descendantLeafIds = /* @__PURE__ */ new Set();
+		for (const child of node.children) for (const id of traverse(child, false)) descendantLeafIds.add(id);
+		if (isCollectable) {
+			containerStack.pop();
+			const { children: _discard, ...rest } = node;
+			containerMap.set(node.id, {
+				node: rest,
+				originalDepth: node.depth,
+				area: node.area || node.width * node.height,
+				hasVisualStyles: checkVisualStyles(node),
+				originalChildIds: node.children.map((c) => c.id),
+				parentContainerId,
+				descendantLeafIds
+			});
+		}
+		return descendantLeafIds;
+	}
+	traverse(tree, true);
+	if (containerMap.size === 0) return [];
+	const childrenOf = /* @__PURE__ */ new Map();
+	for (const c of containerMap.values()) {
+		const key = c.parentContainerId && containerMap.has(c.parentContainerId) ? c.parentContainerId : null;
+		if (!childrenOf.has(key)) childrenOf.set(key, []);
+		childrenOf.get(key).push(c);
+	}
+	const layers = [];
+	let current = childrenOf.get(null) || [];
+	while (current.length > 0) {
+		current.sort((a, b) => b.area - a.area || a.originalDepth - b.originalDepth);
+		layers.push(current);
+		const next = [];
+		for (const c of current) next.push(...childrenOf.get(c.node.id) || []);
+		current = next;
+	}
+	return layers;
+}
 var DEFAULT_OPTIONS$3 = {
 	eps: "auto",
 	minPts: 2,
@@ -1959,6 +2021,164 @@ function clusterWithinContainers(node, options = {}) {
 	}
 	return process(node);
 }
+function placeContainerById(root, template, originalChildIds) {
+	if (!root.children || root.children.length === 0) return false;
+	const childIdSet = new Set(originalChildIds);
+	const victims = [];
+	const remaining = [];
+	for (const child of root.children) (childIdSet.has(child.id) ? victims : remaining).push(child);
+	if (victims.length === 0) return false;
+	const container = {
+		...template,
+		children: victims
+	};
+	root.children = [...remaining, container];
+	return true;
+}
+function calcBounds$3(nodes) {
+	if (nodes.length === 0) return {
+		x: 0,
+		y: 0,
+		width: 0,
+		height: 0
+	};
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	for (const n of nodes) {
+		minX = Math.min(minX, n.x);
+		minY = Math.min(minY, n.y);
+		maxX = Math.max(maxX, n.x + n.width);
+		maxY = Math.max(maxY, n.y + n.height);
+	}
+	return {
+		x: minX,
+		y: minY,
+		width: maxX - minX,
+		height: maxY - minY
+	};
+}
+function placeVirtualGroupById(root, template, originalChildIds) {
+	if (!root.children || root.children.length === 0) return false;
+	const childIdSet = new Set(originalChildIds);
+	const victims = [];
+	const remaining = [];
+	for (const child of root.children) (childIdSet.has(child.id) ? victims : remaining).push(child);
+	if (victims.length < 2 || victims.length < originalChildIds.length / 2) return false;
+	const bounds = calcBounds$3(victims);
+	const virtualGroup = {
+		id: `rel-${template.id}`,
+		name: `RelGroup ${template.name || template.id}`,
+		type: "VIRTUAL_GROUP",
+		x: bounds.x,
+		y: bounds.y,
+		width: bounds.width,
+		height: bounds.height,
+		area: bounds.width * bounds.height,
+		depth: template.depth ?? 0,
+		zIndex: 0,
+		renderOrder: 0,
+		children: victims
+	};
+	root.children = [...remaining, virtualGroup];
+	return true;
+}
+function filterAndPropagate(layers, shouldKeep) {
+	const containerMap = /* @__PURE__ */ new Map();
+	for (const layer of layers) for (const c of layer) containerMap.set(c.node.id, c);
+	const all = layers.flat().sort((a, b) => b.originalDepth - a.originalDepth);
+	const filteredIds = /* @__PURE__ */ new Set();
+	const removedList = [];
+	for (const c of all) {
+		if (shouldKeep(c)) continue;
+		filteredIds.add(c.node.id);
+		removedList.push(c);
+		if (c.parentContainerId && containerMap.has(c.parentContainerId)) {
+			const parent = containerMap.get(c.parentContainerId);
+			const idx = parent.originalChildIds.indexOf(c.node.id);
+			if (idx >= 0) parent.originalChildIds.splice(idx, 1, ...c.originalChildIds);
+		}
+	}
+	if (filteredIds.size === 0) return {
+		kept: layers,
+		removed: []
+	};
+	const result = [];
+	for (const layer of layers) {
+		const kept = layer.filter((c) => !filteredIds.has(c.node.id));
+		if (kept.length > 0) result.push(kept);
+	}
+	return {
+		kept: result,
+		removed: removedList
+	};
+}
+function placeRelGroupsRecursive(root, removedContainers) {
+	for (const { node: template, originalChildIds } of removedContainers) tryPlaceVirtualGroupDeep(root, template, originalChildIds);
+}
+function tryPlaceVirtualGroupDeep(node, template, originalChildIds) {
+	if (!node.children || node.children.length === 0) return false;
+	if (placeVirtualGroupById(node, template, originalChildIds)) return true;
+	for (const child of node.children) if (child.children && child.children.length > 0) {
+		if (tryPlaceVirtualGroupDeep(child, template, originalChildIds)) return true;
+	}
+	return false;
+}
+function clusterUncoveredNodes(root, options) {
+	const { clusterAlgorithm = "dbscan", dbscanEps = "auto", gapThresholdX = 50, gapThresholdY = 30, minClusterSize = 2 } = options;
+	function processNode$1(node) {
+		if (!node.children || node.children.length < 2) return;
+		for (const child of node.children) if (child.children && child.children.length > 0) processNode$1(child);
+		const loose = [];
+		const kept = [];
+		for (const child of node.children) (child.children && child.children.length > 0 ? kept : loose).push(child);
+		if (loose.length < minClusterSize) return;
+		const clustered = clusterAlgorithm === "dbscan" ? clusterWithDBSCAN(loose, {
+			eps: dbscanEps,
+			minPts: 2,
+			distanceType: "gap"
+		}) : clusterLeaves(loose, {
+			gapThresholdX,
+			gapThresholdY,
+			minClusterSize
+		});
+		node.children = [...kept, ...clustered.children || loose];
+	}
+	processNode$1(root);
+}
+function sortChildrenByPosition(node) {
+	if (!node.children || node.children.length === 0) return;
+	for (const child of node.children) sortChildrenByPosition(child);
+	if (node.children.length >= 2) node.children.sort((a, b) => a.y - b.y || a.x - b.x);
+}
+function recoverContainersLayered(root, layers, options) {
+	const result = JSON.parse(JSON.stringify(root));
+	const { containerRecoveryMode = "styled-only" } = options;
+	if (containerRecoveryMode === "none") {
+		for (let i = layers.length - 1; i >= 0; i--) for (const { node: template, originalChildIds } of layers[i]) placeVirtualGroupById(result, template, originalChildIds);
+		sortChildrenByPosition(result);
+		clusterUncoveredNodes(result, options);
+		return result;
+	}
+	let layersToRecover = layers;
+	let removedContainers = [];
+	if (containerRecoveryMode === "styled-only") {
+		const filterResult = filterAndPropagate(layers.map((layer) => layer.map((c) => ({
+			...c,
+			node: { ...c.node },
+			originalChildIds: [...c.originalChildIds],
+			descendantLeafIds: new Set(c.descendantLeafIds)
+		}))), (c) => c.hasVisualStyles);
+		layersToRecover = filterResult.kept;
+		removedContainers = filterResult.removed;
+	}
+	for (let i = layersToRecover.length - 1; i >= 0; i--) for (const { node: template, originalChildIds } of layersToRecover[i]) placeContainerById(result, template, originalChildIds);
+	if (removedContainers.length > 0) placeRelGroupsRecursive(result, removedContainers);
+	sortChildrenByPosition(result);
+	clusterUncoveredNodes(result, options);
+	return result;
+}
 var MIN_GAP_THRESHOLD$1 = 2;
 function detectDirection(children) {
 	if (children.length < 2) return "row";
@@ -2289,7 +2509,7 @@ var CONTAINER_TYPES$2 = new Set([
 	"COMPONENT",
 	"SECTION"
 ]);
-function calcBounds$3(elements) {
+function calcBounds$2(elements) {
 	if (elements.length === 0) return {
 		x: 0,
 		y: 0,
@@ -2327,7 +2547,7 @@ function isolateFullCoverElements(elements) {
 		isolated: [],
 		hasIsolated: false
 	};
-	const bounds = calcBounds$3(elements);
+	const bounds = calcBounds$2(elements);
 	const isolated = [];
 	const normal = [];
 	for (const element of elements) if (isFullCoverElement(element, bounds, elements)) isolated.push(element);
@@ -2389,7 +2609,7 @@ function prefilterOverlappingLayers(elements) {
 		hasChanges: dedupeResult.hasRemoved || isolateResult.hasIsolated
 	};
 }
-function calcBounds$2(nodes) {
+function calcBounds$1(nodes) {
 	if (nodes.length === 0) return {
 		x: 0,
 		y: 0,
@@ -2419,7 +2639,7 @@ function absorbFullCoverLayersAsBackground(parent, isolated, normalNodes) {
 	if (normalNodes.length === 0) return isolated;
 	const parentArea = Math.max(0, (parent.width || 0) * (parent.height || 0));
 	if (parentArea === 0) return isolated;
-	const normalBounds = calcBounds$2(normalNodes);
+	const normalBounds = calcBounds$1(normalNodes);
 	if (Math.max(0, normalBounds.width * normalBounds.height) / parentArea < .35) return isolated;
 	const kept = [];
 	for (const layer of isolated) {
@@ -2582,10 +2802,12 @@ function buildSplitResult(elements, gaps, axis) {
 function chooseBestAxis(elements, yGaps, xGaps) {
 	const yGroups = splitByGapsGeneric(elements, yGaps, "y").length;
 	const xGroups = splitByGapsGeneric(elements, xGaps, "x").length;
-	if (xGroups < yGroups) return "x";
-	if (yGroups < xGroups) return "y";
-	const yMaxGap = Math.max(...yGaps.map((g) => g.end - g.start));
-	if (Math.max(...xGaps.map((g) => g.end - g.start)) > yMaxGap) return "x";
+	const diff = Math.abs(xGroups - yGroups);
+	if (diff >= 2) return xGroups < yGroups ? "x" : "y";
+	if (diff === 0) {
+		const yMaxGap = Math.max(...yGaps.map((g) => g.end - g.start));
+		if (Math.max(...xGaps.map((g) => g.end - g.start)) > yMaxGap) return "x";
+	}
 	return "y";
 }
 function trySeparateFullWidthElements(elements) {
@@ -3759,226 +3981,6 @@ function stylesToInlineString(styles) {
 	if (styles.textDecoration) parts.push(`text-decoration: ${styles.textDecoration}`);
 	return parts.join("; ");
 }
-var COLLECTABLE_TYPES = new Set([
-	"FRAME",
-	"GROUP",
-	"SECTION",
-	"INSTANCE",
-	"COMPONENT",
-	"COMPONENT_SET"
-]);
-function checkVisualStyles(node) {
-	const hasFills = Array.isArray(node.fills) && node.fills.some((f) => f.visible !== false);
-	const hasStrokes = Array.isArray(node.strokes) && node.strokes.some((s) => s.visible !== false);
-	const hasCorner = !!(node.cornerRadius && node.cornerRadius > 0) || !!node.borderRadius;
-	return hasFills || hasStrokes || hasCorner;
-}
-function collectContainers(tree) {
-	const containerMap = /* @__PURE__ */ new Map();
-	const containerStack = [];
-	function traverse(node, isRoot) {
-		if (LEAF_TYPES.has(node.type)) return new Set([node.id]);
-		if (!node.children || node.children.length === 0) {
-			if (CONTAINER_TYPES.has(node.type)) return /* @__PURE__ */ new Set();
-			return new Set([node.id]);
-		}
-		const isCollectable = !isRoot && COLLECTABLE_TYPES.has(node.type);
-		const parentContainerId = isCollectable ? containerStack.length > 0 ? containerStack[containerStack.length - 1] : null : null;
-		if (isCollectable) containerStack.push(node.id);
-		const descendantLeafIds = /* @__PURE__ */ new Set();
-		for (const child of node.children) for (const id of traverse(child, false)) descendantLeafIds.add(id);
-		if (isCollectable) {
-			containerStack.pop();
-			const { children: _discard, ...rest } = node;
-			containerMap.set(node.id, {
-				node: rest,
-				originalDepth: node.depth,
-				area: node.area || node.width * node.height,
-				hasVisualStyles: checkVisualStyles(node),
-				originalChildIds: node.children.map((c) => c.id),
-				parentContainerId,
-				descendantLeafIds
-			});
-		}
-		return descendantLeafIds;
-	}
-	traverse(tree, true);
-	if (containerMap.size === 0) return [];
-	const childrenOf = /* @__PURE__ */ new Map();
-	for (const c of containerMap.values()) {
-		const key = c.parentContainerId && containerMap.has(c.parentContainerId) ? c.parentContainerId : null;
-		if (!childrenOf.has(key)) childrenOf.set(key, []);
-		childrenOf.get(key).push(c);
-	}
-	const layers = [];
-	let current = childrenOf.get(null) || [];
-	while (current.length > 0) {
-		current.sort((a, b) => b.area - a.area || a.originalDepth - b.originalDepth);
-		layers.push(current);
-		const next = [];
-		for (const c of current) next.push(...childrenOf.get(c.node.id) || []);
-		current = next;
-	}
-	return layers;
-}
-function placeContainerById(root, template, originalChildIds) {
-	if (!root.children || root.children.length === 0) return false;
-	const childIdSet = new Set(originalChildIds);
-	const victims = [];
-	const remaining = [];
-	for (const child of root.children) (childIdSet.has(child.id) ? victims : remaining).push(child);
-	if (victims.length === 0) return false;
-	const container = {
-		...template,
-		children: victims
-	};
-	root.children = [...remaining, container];
-	return true;
-}
-function calcBounds$1(nodes) {
-	if (nodes.length === 0) return {
-		x: 0,
-		y: 0,
-		width: 0,
-		height: 0
-	};
-	let minX = Infinity;
-	let minY = Infinity;
-	let maxX = -Infinity;
-	let maxY = -Infinity;
-	for (const n of nodes) {
-		minX = Math.min(minX, n.x);
-		minY = Math.min(minY, n.y);
-		maxX = Math.max(maxX, n.x + n.width);
-		maxY = Math.max(maxY, n.y + n.height);
-	}
-	return {
-		x: minX,
-		y: minY,
-		width: maxX - minX,
-		height: maxY - minY
-	};
-}
-function placeVirtualGroupById(root, template, originalChildIds) {
-	if (!root.children || root.children.length === 0) return false;
-	const childIdSet = new Set(originalChildIds);
-	const victims = [];
-	const remaining = [];
-	for (const child of root.children) (childIdSet.has(child.id) ? victims : remaining).push(child);
-	if (victims.length < 2) return false;
-	const bounds = calcBounds$1(victims);
-	const virtualGroup = {
-		id: `rel-${template.id}`,
-		name: `RelGroup ${template.name || template.id}`,
-		type: "VIRTUAL_GROUP",
-		x: bounds.x,
-		y: bounds.y,
-		width: bounds.width,
-		height: bounds.height,
-		area: bounds.width * bounds.height,
-		depth: template.depth ?? 0,
-		zIndex: 0,
-		renderOrder: 0,
-		children: victims
-	};
-	root.children = [...remaining, virtualGroup];
-	return true;
-}
-function filterAndPropagate(layers, shouldKeep) {
-	const containerMap = /* @__PURE__ */ new Map();
-	for (const layer of layers) for (const c of layer) containerMap.set(c.node.id, c);
-	const all = layers.flat().sort((a, b) => b.originalDepth - a.originalDepth);
-	const filteredIds = /* @__PURE__ */ new Set();
-	const removedList = [];
-	for (const c of all) {
-		if (shouldKeep(c)) continue;
-		filteredIds.add(c.node.id);
-		removedList.push(c);
-		if (c.parentContainerId && containerMap.has(c.parentContainerId)) {
-			const parent = containerMap.get(c.parentContainerId);
-			const idx = parent.originalChildIds.indexOf(c.node.id);
-			if (idx >= 0) parent.originalChildIds.splice(idx, 1, ...c.originalChildIds);
-		}
-	}
-	if (filteredIds.size === 0) return {
-		kept: layers,
-		removed: []
-	};
-	const result = [];
-	for (const layer of layers) {
-		const kept = layer.filter((c) => !filteredIds.has(c.node.id));
-		if (kept.length > 0) result.push(kept);
-	}
-	return {
-		kept: result,
-		removed: removedList
-	};
-}
-function placeRelGroupsRecursive(root, removedContainers) {
-	for (const { node: template, originalChildIds } of removedContainers) tryPlaceVirtualGroupDeep(root, template, originalChildIds);
-}
-function tryPlaceVirtualGroupDeep(node, template, originalChildIds) {
-	if (!node.children || node.children.length === 0) return false;
-	if (placeVirtualGroupById(node, template, originalChildIds)) return true;
-	for (const child of node.children) if (child.children && child.children.length > 0) {
-		if (tryPlaceVirtualGroupDeep(child, template, originalChildIds)) return true;
-	}
-	return false;
-}
-function clusterUncoveredNodes(root, options) {
-	const { clusterAlgorithm = "dbscan", dbscanEps = "auto", gapThresholdX = 50, gapThresholdY = 30, minClusterSize = 2 } = options;
-	function processNode$1(node) {
-		if (!node.children || node.children.length < 2) return;
-		for (const child of node.children) if (child.children && child.children.length > 0) processNode$1(child);
-		const loose = [];
-		const kept = [];
-		for (const child of node.children) (child.children && child.children.length > 0 ? kept : loose).push(child);
-		if (loose.length < minClusterSize) return;
-		const clustered = clusterAlgorithm === "dbscan" ? clusterWithDBSCAN(loose, {
-			eps: dbscanEps,
-			minPts: 2,
-			distanceType: "gap"
-		}) : clusterLeaves(loose, {
-			gapThresholdX,
-			gapThresholdY,
-			minClusterSize
-		});
-		node.children = [...kept, ...clustered.children || loose];
-	}
-	processNode$1(root);
-}
-function sortChildrenByPosition(node) {
-	if (!node.children || node.children.length === 0) return;
-	for (const child of node.children) sortChildrenByPosition(child);
-	if (node.children.length >= 2) node.children.sort((a, b) => a.y - b.y || a.x - b.x);
-}
-function recoverContainersLayered(root, layers, options) {
-	const result = JSON.parse(JSON.stringify(root));
-	const { containerRecoveryMode = "styled-only" } = options;
-	if (containerRecoveryMode === "none") {
-		for (let i = layers.length - 1; i >= 0; i--) for (const { node: template, originalChildIds } of layers[i]) placeVirtualGroupById(result, template, originalChildIds);
-		sortChildrenByPosition(result);
-		clusterUncoveredNodes(result, options);
-		return result;
-	}
-	let layersToRecover = layers;
-	let removedContainers = [];
-	if (containerRecoveryMode === "styled-only") {
-		const filterResult = filterAndPropagate(layers.map((layer) => layer.map((c) => ({
-			...c,
-			node: { ...c.node },
-			originalChildIds: [...c.originalChildIds],
-			descendantLeafIds: new Set(c.descendantLeafIds)
-		}))), (c) => c.hasVisualStyles);
-		layersToRecover = filterResult.kept;
-		removedContainers = filterResult.removed;
-	}
-	for (let i = layersToRecover.length - 1; i >= 0; i--) for (const { node: template, originalChildIds } of layersToRecover[i]) placeContainerById(result, template, originalChildIds);
-	if (removedContainers.length > 0) placeRelGroupsRecursive(result, removedContainers);
-	sortChildrenByPosition(result);
-	clusterUncoveredNodes(result, options);
-	return result;
-}
 const DEFAULT_COMPRESS_OPTIONS = {
 	simplifyId: false,
 	removeCoordinates: true,
@@ -4582,7 +4584,7 @@ function collectAllStyles(node, isRoot, path, parentCtx, entries, contexts) {
 		});
 	}
 }
-function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode, dedupResult, path, _parentCtx, semanticTags = true) {
+function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode, dedupResult, path, _parentCtx, semanticTags = true, includeNodeId = true) {
 	const hasChildren = node.children && node.children.length > 0;
 	const nodeId = node.id || `node-${path}`;
 	const tagInfo = semanticTags ? inferTag(node) : { tag: "div" };
@@ -4594,7 +4596,7 @@ function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode,
 	let content = "";
 	if (node.characters) content = escapeHtml(node.characters);
 	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
-	const dataNodeId = nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
+	const dataNodeId = includeNodeId && nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
 	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
 	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
 	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses}"${dataNodeId}${dataType}${roleAttr}${altAttr} />`;
@@ -4621,7 +4623,7 @@ function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode,
 			...childCtxBase,
 			prevSibling: prev
 		};
-		return renderNodeWithDedup(child, false, includeLabels, classMode, debugMode, dedupResult, `${path}-${index}`, childCtx, semanticTags);
+		return renderNodeWithDedup(child, false, includeLabels, classMode, debugMode, dedupResult, `${path}-${index}`, childCtx, semanticTags, includeNodeId);
 	}).join("")}</${tag}>`;
 }
 function generateUniqueCssRules(dedupResult) {
@@ -4637,7 +4639,7 @@ function generateUniqueCssRules(dedupResult) {
 	}
 	return rules.join("\n\n");
 }
-function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules, path, parentCtx, semanticTags = true) {
+function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules, path, parentCtx, semanticTags = true, includeNodeId = true) {
 	const hasChildren = node.children && node.children.length > 0;
 	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
 	const sortedChildren = hasChildren ? [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y) : [];
@@ -4660,7 +4662,7 @@ function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules,
 	let content = "";
 	if (node.characters) content = escapeHtml(node.characters);
 	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
-	const dataNodeId = nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
+	const dataNodeId = includeNodeId && nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
 	if (debugMode && node.id) allClasses.push(nodeIdToClass(node.id));
 	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
 	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
@@ -4685,13 +4687,13 @@ function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules,
 			...childCtxBase,
 			prevSibling: prev
 		};
-		return renderNode(child, false, includeLabels, classMode, debugMode, cssRules, `${path}-${index}`, childCtx, semanticTags);
+		return renderNode(child, false, includeLabels, classMode, debugMode, cssRules, `${path}-${index}`, childCtx, semanticTags, includeNodeId);
 	}).join("");
 	return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataType}${roleAttr}>${label}${childrenHtml}</${tag}>`;
 }
 function renderLayoutToHtml(node, options = {}) {
-	const { scale = 1, rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, semanticTags = true } = options;
-	return `<div class="${rootClassName} ${formatScaleClass(scale)}">${renderNode(removeRedundantNesting(node), true, includeLabels, classMode, debugMode, [], "0", void 0, semanticTags)}</div>`;
+	const { scale = 1, rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, semanticTags = true, includeNodeId = true } = options;
+	return `<div class="${rootClassName} ${formatScaleClass(scale)}">${renderNode(removeRedundantNesting(node), true, includeLabels, classMode, debugMode, [], "0", void 0, semanticTags, includeNodeId)}</div>`;
 }
 function renderNodeAbsolute(node, isRoot, includeLabels, cssRules, path, parentX, parentY) {
 	const hasChildren = node.children && node.children.length > 0;
@@ -4781,7 +4783,7 @@ var BASE_STYLES = `body { margin: 0; padding: 16px; }
 .type-image, .type-icon, .type-vector { background: #d1d5db !important; border-radius: 4px; }`;
 function renderLayoutPageWithCss(node, options = {}) {
 	const { title = "Layout Render", includeStyles = true, ...rest } = options;
-	const { rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, enableDedup = false, semanticTags = true } = rest;
+	const { rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, enableDedup = false, semanticTags = true, includeNodeId = true } = rest;
 	const designWidth = node.width || 1920;
 	const cleanedNode = removeRedundantNesting(node);
 	let body;
@@ -4790,11 +4792,11 @@ function renderLayoutPageWithCss(node, options = {}) {
 		const entries = [];
 		collectAllStyles(cleanedNode, true, "0", void 0, entries, []);
 		const dedupResult = deduplicateStyles(entries);
-		body = `<div id="layout-container" class="${rootClassName}">${renderNodeWithDedup(cleanedNode, true, includeLabels, classMode, debugMode, dedupResult, "0", void 0, semanticTags)}</div>`;
+		body = `<div id="layout-container" class="${rootClassName}">${renderNodeWithDedup(cleanedNode, true, includeLabels, classMode, debugMode, dedupResult, "0", void 0, semanticTags, includeNodeId)}</div>`;
 		css = [generateSharedCss(dedupResult.sharedClasses), generateUniqueCssRules(dedupResult)].filter(Boolean).join("\n\n");
 	} else {
 		const cssRules = [];
-		body = `<div id="layout-container" class="${rootClassName}">${renderNode(cleanedNode, true, includeLabels, classMode, debugMode, cssRules, "0", void 0, semanticTags)}</div>`;
+		body = `<div id="layout-container" class="${rootClassName}">${renderNode(cleanedNode, true, includeLabels, classMode, debugMode, cssRules, "0", void 0, semanticTags, includeNodeId)}</div>`;
 		css = cssRules.join("\n\n");
 	}
 	const fullCss = `${BASE_STYLES}\n\n${css}`;
@@ -5273,7 +5275,7 @@ const utils = {
 	isAtomicComponent
 };
 function processDesign(json, options = {}) {
-	const { removeHidden = true, removeTransparent = true, removeZeroSize = true, removeOverflow = true, removeOccluded = true, autoSort = true, flattenMode = "smart", clusterAlgorithm = "dbscan", dbscanEps = "auto", gapThresholdX = 50, gapThresholdY = 30, minClusterSize = 2, generateStyles = true } = options;
+	const { removeHidden = true, removeTransparent = true, removeZeroSize = true, removeOverflow = true, removeOccluded = true, autoSort = true, flattenMode = "full", containerRecoveryMode = "styled-only", clusterAlgorithm = "dbscan", dbscanEps = "auto", gapThresholdX = 50, gapThresholdY = 30, minClusterSize = 2, generateStyles = true } = options;
 	const { tree: preprocessed, stats } = processPipeline(json, {
 		removeHidden,
 		removeTransparent,
@@ -5288,6 +5290,7 @@ function processDesign(json, options = {}) {
 		stages: {
 			preprocessed: null,
 			flattened: null,
+			recovered: null,
 			clustered: null,
 			split: null
 		},
@@ -5304,35 +5307,26 @@ function processDesign(json, options = {}) {
 	if (flattenMode === "full") {
 		const leaves = flattenToLeaves(preprocessed);
 		flattened = {
-			id: "flatten-root",
-			name: "Root",
-			type: "FRAME",
-			x: preprocessed.x,
-			y: preprocessed.y,
-			width: preprocessed.width,
-			height: preprocessed.height,
-			area: preprocessed.area,
-			depth: 0,
-			zIndex: 0,
-			renderOrder: 0,
+			...preprocessed,
 			children: leaves
 		};
 	} else if (flattenMode === "smart") flattened = smartFlatten(preprocessed);
 	else flattened = preserveGroupsFlatten(preprocessed);
-	let clustered;
+	let recovered = flattened;
 	if (flattenMode === "full") {
-		const leaves = flattened.children || [];
-		if (clusterAlgorithm === "dbscan") clustered = clusterWithDBSCAN(leaves, {
-			eps: dbscanEps,
-			minPts: 2,
-			distanceType: "gap"
-		});
-		else clustered = clusterLeaves(leaves, {
+		const containerLayers = collectContainers(preprocessed);
+		recovered = recoverContainersLayered(flattened, containerLayers, {
+			clusterAlgorithm,
+			dbscanEps,
 			gapThresholdX,
 			gapThresholdY,
-			minClusterSize
+			minClusterSize,
+			containerRecoveryMode
 		});
-	} else clustered = clusterWithinContainers(flattened, {
+	}
+	let clustered;
+	if (flattenMode === "full") clustered = recovered;
+	else clustered = clusterWithinContainers(recovered, {
 		algorithm: clusterAlgorithm,
 		dbscanEps,
 		gapThresholdX,
@@ -5340,20 +5334,9 @@ function processDesign(json, options = {}) {
 		minClusterSize
 	});
 	let split;
-	if (flattenMode === "full") {
-		const elements = clustered.children || [];
-		if (elements.length === 0) split = clustered;
-		else {
-			const splitTree = splitResultToTree(projectionSplit(elements), "split", { flattenRootGroup: true });
-			split = Array.isArray(splitTree) ? {
-				...clustered,
-				children: splitTree
-			} : {
-				...clustered,
-				children: [splitTree]
-			};
-		}
-	} else split = splitWithinContainers(clustered);
+	if (flattenMode === "full") if ((clustered.children || []).length === 0) split = clustered;
+	else split = splitWithinContainers(clustered);
+	else split = splitWithinContainers(clustered);
 	applyLayout(split);
 	let final = split;
 	if (generateStyles) final = applyStylesToTree(split);
@@ -5362,6 +5345,7 @@ function processDesign(json, options = {}) {
 		stages: {
 			preprocessed,
 			flattened,
+			recovered,
 			clustered,
 			split
 		},
