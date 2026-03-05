@@ -10,6 +10,14 @@ const TEST_FILE_DETAIL = '__test_detail__';
 const TEST_FILE_FIGMA = '__test_figma__';
 const TEST_JSON = { nodes: [{ type: 'Frame', name: 'Home', children: [] }] };
 
+/** 从 handleDesignToCode 输出文本中提取 ```json ... ``` 代码块并解析 */
+function extractDslJson(text: string): Record<string, unknown> | null {
+  const match = text.match(/```json\n([\s\S]*?)\n```/);
+  if (!match) return null;
+  try { return JSON.parse(match[1]); } catch { return null; }
+}
+
+
 /** 最小可处理的 Figma JSON（能通过 processDesign 布局引擎） */
 const MINIMAL_FIGMA_JSON = {
   type: 'FRAME',
@@ -163,7 +171,9 @@ describe('design_to_code 读取转换', () => {
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
     expect(first.text).toContain('DSL');
-    expect(first.text).toContain('"id"');
+    const dsl = extractDslJson(first.text);
+    expect(dsl).not.toBeNull();
+    expect(dsl).toHaveProperty('id');
   });
 
   it('outputMode=html 返回 HTML 内容', async () => {
@@ -323,7 +333,9 @@ describe('design_to_code OCTO_DIR 环境变量', () => {
     expect(result.isError).toBeUndefined();
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
-    expect(first.text).toContain('"id"');
+    const dsl = extractDslJson(first.text);
+    expect(dsl).not.toBeNull();
+    expect(dsl).toHaveProperty('id');
   });
 });
 

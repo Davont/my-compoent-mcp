@@ -84,6 +84,11 @@ function formatTransformOutput(
     lines.push('```json');
     lines.push(content);
     lines.push('```');
+    lines.push('');
+    lines.push('> DSL 字段：id=顺序编号, type=节点类型, w/h=宽高, text=文本内容, name=组件名');
+    lines.push('> layout: direction/align/justify/gap/ml/mt/mr/mb/pl/pt/pr/pb');
+    lines.push('> styles: bg/border/radius/shadow/color/size/weight/leading');
+    lines.push('> INSTANCE 节点对应 my-design 组件');
   }
 
   if (componentBundle) {
@@ -108,26 +113,10 @@ function formatTransformOutput(
 export const designToCodeTool: Tool = {
   name: 'design_to_code',
   description:
-    '将 Octo 设计稿转换为 AI 可直接消费的结构化数据，用于生成符合 my-design 组件规范的页面代码。\n\n' +
-    '## 能力\n' +
-    '1. 读取 .octo/ 目录下的 Octo 导出 JSON\n' +
-    '2. 通过布局引擎自动推断 flex 布局（方向、对齐、间距、margin/padding）和 CSS 样式\n' +
-    '3. 输出精简 DSL（字段缩写、颜色转 hex、去单位、省略默认值，token 消耗约为原始 JSON 的 40%）或语义化 HTML\n' +
-    '4. 自动识别设计稿中使用的 my-design 组件（Button、Input、Modal 等），并联动 get_context_bundle 返回对应的 Props 和使用规范\n\n' +
-    '## 使用方式\n' +
+    '将 Octo 设计稿转换为精简 DSL 或语义化 HTML，自动推断 flex 布局和 CSS 样式，识别 my-design 组件并联动返回 Props 规范。\n\n' +
     '- 不传 file：列出 .octo/ 下所有可用文件名\n' +
-    '- 传 file：转换指定设计稿，返回 DSL/HTML + 组件规范（如有匹配）\n\n' +
-    '## DSL 输出格式说明\n' +
-    '- id: 顺序整数 | type: 节点类型 | w/h: 宽高\n' +
-    '- layout: { direction, align, justify, gap, ml/mt/mr/mb, pl/pt/pr/pb }\n' +
-    '- styles: { bg, border, radius, shadow, color, size, weight, leading }\n' +
-    '- TEXT 节点额外有 text 字段（显示文本）\n' +
-    '- INSTANCE 节点对应组件库组件，name 字段包含组件名\n\n' +
-    '## 推荐流程\n' +
-    '当用户要求"根据设计稿生成代码"时：\n' +
-    '1. 调用 design_to_code({ file: "index" }) 获取设计稿 DSL + 组件规范\n' +
-    '2. 根据 DSL 中的布局结构和组件规范，直接生成 React 页面代码\n' +
-    '3. 如需补充组件信息，调用 get_context_bundle 获取更多细节',
+    '- 传 file：转换指定设计稿，返回结构化数据 + 组件规范（如有匹配）\n\n' +
+    '推荐流程：design_to_code → 获取 DSL + 组件规范 → 生成 React 代码 → 如需补充调用 get_context_bundle',
   inputSchema: {
     type: 'object',
     properties: {
