@@ -3988,7 +3988,7 @@ const DEFAULT_COMPRESS_OPTIONS = {
 	omitDefaults: true,
 	convertColors: true,
 	removeUnits: true,
-	minify: false
+	minify: true
 };
 function rgbToHex(color) {
 	if (!color) return color;
@@ -4179,7 +4179,7 @@ function countNodes(node) {
 	if (node.children) for (const child of node.children) count += countNodes(child);
 	return count;
 }
-function toJsonString(node, minify = false) {
+function toJsonString(node, minify = true) {
 	return JSON.stringify(node, null, minify ? 0 : 2);
 }
 function printStats(stats) {
@@ -4198,6 +4198,681 @@ function printStats(stats) {
 	console.log("节省:");
 	console.log(`  - ${stats.savings.percent} (${stats.savings.bytes} bytes)`);
 	console.log(`  - ~${stats.savings.tokens} tokens`);
+}
+function computeFingerprint(styles) {
+	if (styles.length === 0) return "";
+	const str = [...styles].sort().join("|");
+	let hash = 0;
+	for (let i = 0; i < str.length; i++) {
+		const char = str.charCodeAt(i);
+		hash = (hash << 5) - hash + char;
+		hash = hash & hash;
+	}
+	return Math.abs(hash).toString(16).padStart(8, "0");
+}
+function generateSharedClassName(fingerprint, _index) {
+	return `s-${fingerprint.slice(0, 6)}`;
+}
+function deduplicateStyles(entries, minSharedCount = 2) {
+	const sharedClasses = [];
+	const nodeClassMap = /* @__PURE__ */ new Map();
+	const uniqueStyles = /* @__PURE__ */ new Map();
+	const groups = /* @__PURE__ */ new Map();
+	for (const entry of entries) {
+		if (!entry.fingerprint) continue;
+		const group = groups.get(entry.fingerprint) || [];
+		group.push(entry);
+		groups.set(entry.fingerprint, group);
+	}
+	const usedClassNames = /* @__PURE__ */ new Set();
+	for (const [fingerprint, group] of groups) if (group.length >= minSharedCount) {
+		let className = generateSharedClassName(fingerprint, sharedClasses.length);
+		while (usedClassNames.has(className)) className = `${className}-${sharedClasses.length}`;
+		usedClassNames.add(className);
+		sharedClasses.push({
+			className,
+			styles: group[0].styles,
+			nodeIds: group.map((e) => e.nodeId)
+		});
+		for (const entry of group) nodeClassMap.set(entry.nodeId, [className]);
+	} else for (const entry of group) {
+		nodeClassMap.set(entry.nodeId, [entry.nodeClass]);
+		uniqueStyles.set(entry.nodeId, entry.styles);
+	}
+	return {
+		sharedClasses,
+		nodeClassMap,
+		uniqueStyles
+	};
+}
+function generateSharedCss(sharedClasses) {
+	if (sharedClasses.length === 0) return "";
+	return `/* 共享样式类 */\n${sharedClasses.map((sc) => {
+		const body = sc.styles.map((s) => `  ${s};`).join("\n");
+		return `.${sc.className} {\n${body}\n}`;
+	}).join("\n\n")}`;
+}
+function createStyleEntry(nodeId, nodeClass, styles) {
+	return {
+		nodeId,
+		nodeClass,
+		styles,
+		fingerprint: computeFingerprint(styles)
+	};
+}
+var NAME_TAG_RULES = [
+	{
+		exact: [
+			"button",
+			"btn",
+			"按钮"
+		],
+		contains: ["button", "btn"],
+		tag: "button",
+		extraClass: "btn"
+	},
+	{
+		exact: ["card", "卡片"],
+		startsWith: ["卡片"],
+		tag: "article",
+		extraClass: "card"
+	},
+	{
+		exact: [
+			"link",
+			"链接",
+			"常用链接"
+		],
+		tag: "a",
+		extraClass: "link"
+	}
+];
+function inferTagFromName(name) {
+	if (!name) return null;
+	const lowerName = name.toLowerCase().trim();
+	for (const rule of NAME_TAG_RULES) {
+		if (rule.exact) {
+			for (const keyword of rule.exact) if (lowerName === keyword.toLowerCase()) return {
+				tag: rule.tag,
+				role: rule.role,
+				extraClass: rule.extraClass
+			};
+		}
+		if (rule.startsWith) {
+			for (const keyword of rule.startsWith) if (lowerName.startsWith(keyword.toLowerCase())) return {
+				tag: rule.tag,
+				role: rule.role,
+				extraClass: rule.extraClass
+			};
+		}
+		if (rule.contains) {
+			for (const keyword of rule.contains) if (keyword.match(/^[a-z]+$/i)) {
+				if (new RegExp(`(^|[^a-z])${keyword}([^a-z]|$)`, "i").test(lowerName)) return {
+					tag: rule.tag,
+					role: rule.role,
+					extraClass: rule.extraClass
+				};
+			}
+		}
+	}
+	return null;
+}
+function inferTagFromType(node) {
+	switch (node.type) {
+		case "TEXT": return {
+			tag: "span",
+			extraClass: "text"
+		};
+		case "ICON": return {
+			tag: "span",
+			extraClass: "icon",
+			role: "img"
+		};
+		case "IMAGE": return {
+			tag: "img",
+			role: "img"
+		};
+		case "VECTOR": return {
+			tag: "span",
+			extraClass: "vector",
+			role: "img"
+		};
+		case "INSTANCE":
+		case "VIRTUAL_GROUP":
+		case "FRAME":
+		case "GROUP":
+		default: return { tag: "div" };
+	}
+}
+function inferTag(node) {
+	const nameInference = inferTagFromName(node.name);
+	if (nameInference) return nameInference;
+	return inferTagFromType(node);
+}
+function isSelfClosingTag(tag) {
+	return [
+		"img",
+		"input",
+		"br",
+		"hr",
+		"meta",
+		"link"
+	].includes(tag);
+}
+function removeRedundantNesting(node) {
+	if (node.children && node.children.length > 0) node = {
+		...node,
+		children: node.children.map((child) => removeRedundantNesting(child))
+	};
+	if (node.children && node.children.length === 1 && node.children[0].children && node.children[0].children.length > 0) {
+		const child = node.children[0];
+		const sameSize = Math.abs(node.width - child.width) < 2 && Math.abs(node.height - child.height) < 2;
+		const isVirtualGroup = child.type === "VIRTUAL_GROUP";
+		if (sameSize && isVirtualGroup) return {
+			...node,
+			layout: child.layout || node.layout,
+			children: child.children
+		};
+	}
+	return node;
+}
+function escapeHtml(input) {
+	return input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function sanitizeClassName(value) {
+	return value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function nodeIdToClass(nodeId) {
+	return `id-${nodeId.replace(/[^a-zA-Z0-9]/g, "-")}`;
+}
+function buildClassNames(node, classMode, debugMode = false) {
+	const hasChildren = node.children && node.children.length > 0;
+	const classes = [];
+	if (debugMode) {
+		classes.push("layout-node", hasChildren ? "is-container" : "is-leaf", `type-${node.type.toLowerCase()}`);
+		if (node.id) classes.push(nodeIdToClass(node.id));
+	} else {
+		classes.push("layout-node");
+		const hasExplicitVisualStyles = !!(node.styles?.background || node.styles?.border || node.styles?.borderRadius);
+		if (node.mask !== true && !hasExplicitVisualStyles) {
+			if (node.type === "IMAGE") classes.push("type-image");
+			else if (node.type === "ICON") classes.push("type-icon");
+			else if (node.type === "VECTOR") classes.push("type-vector");
+		}
+	}
+	if (classMode === "tailwind") {
+		if (node.layout?.display === "flex") {
+			const direction = node.layout.flexDirection === "row" || !node.layout.flexDirection ? "row" : "col";
+			const alignItems = node.layout.alignItems || "flex-start";
+			let alignSuffix = "start";
+			if (alignItems === "center") alignSuffix = "center";
+			else if (alignItems === "flex-end") alignSuffix = "end";
+			classes.push(`flex-${direction}-${alignSuffix}`);
+			const justify = node.layout.justifyContent;
+			if (justify === "center") classes.push("justify-center");
+			else if (justify === "flex-end") classes.push("justify-end");
+			else if (justify === "space-between") classes.push("justify-between");
+		}
+	} else classes.push("layout-box");
+	return classes;
+}
+function formatScaleClass(scale) {
+	return `scale-${String(scale).replace(".", "_")}`;
+}
+function shouldUseSpaceBetween(node, spacingAnalysis) {
+	if (!spacingAnalysis || !node.children || node.children.length !== 2) return false;
+	if (!(node.layout?.flexDirection === "row" || !node.layout?.flexDirection)) return false;
+	if (!spacingAnalysis.useGap || spacingAnalysis.gap <= 0) return false;
+	const justify = node.layout?.justifyContent;
+	if (justify && justify !== "flex-start") return false;
+	const parentWidth = typeof node.width === "number" ? node.width : 0;
+	if (parentWidth <= 0) return false;
+	const { left, right } = spacingAnalysis.padding;
+	if (left > 1 || right > 1) return false;
+	const sorted = [...node.children].sort((a, b) => a.x - b.x);
+	const leftWidth = getEffectiveBounds(sorted[0]).width;
+	const rightWidth = getEffectiveBounds(sorted[1]).width;
+	const expectedGap = parentWidth - left - right - leftWidth - rightWidth;
+	return Math.abs(expectedGap - spacingAnalysis.gap) <= 2;
+}
+function collectStyleParts(node, isRoot, spacingAnalysis, parentCtx) {
+	const parts = [];
+	const isLeaf = !node.children || node.children.length === 0;
+	const isGraphic = [
+		"IMAGE",
+		"ICON",
+		"RECTANGLE",
+		"ELLIPSE",
+		"LINE",
+		"POLYGON",
+		"STAR",
+		"VECTOR",
+		"PATH"
+	].includes(node.type);
+	const isText = node.type === "TEXT";
+	const hasVisualStyles = !!(node.styles?.background || node.styles?.border || node.styles?.borderRadius);
+	const addDimensions = () => {
+		if (typeof node.width === "number" && node.width > 0) parts.push(`width: ${node.width}px`);
+		if (typeof node.height === "number" && node.height > 0) parts.push(`height: ${node.height}px`);
+	};
+	if (isRoot) addDimensions();
+	else if (isGraphic) addDimensions();
+	else if (isText) {
+		const baselines = node.textData?.baselines;
+		const baselineCount = Array.isArray(baselines) ? baselines.length : 0;
+		const hasBaselineInfo = baselineCount > 0;
+		const isMultiLineByBaseline = hasBaselineInfo && baselineCount > 1;
+		let isMultiLineByHeight = false;
+		if (!hasBaselineInfo) {
+			const singleLineHeight = parseFloat(node.styles?.fontSize || "14px") * parseFloat(node.styles?.lineHeight || "1.5");
+			isMultiLineByHeight = !!(node.height && node.height > singleLineHeight + 1);
+		}
+		if (isMultiLineByBaseline || isMultiLineByHeight) {
+			if (typeof node.width === "number" && node.width > 0) parts.push(`width: ${node.width}px`);
+		}
+	} else if (isLeaf) addDimensions();
+	else if (hasVisualStyles) addDimensions();
+	const layoutGap = node.layout?.gap;
+	const hasLayoutGap = typeof layoutGap === "number" && layoutGap > 0;
+	const hasLayoutPadding = typeof node.layout?.paddingTop === "number" || typeof node.layout?.paddingRight === "number" || typeof node.layout?.paddingBottom === "number" || typeof node.layout?.paddingLeft === "number";
+	if (hasLayoutGap || hasLayoutPadding) {
+		if (hasLayoutGap) parts.push(`gap: ${layoutGap}px`);
+		const pt = node.layout?.paddingTop ?? 0;
+		const pr = node.layout?.paddingRight ?? 0;
+		const pb = node.layout?.paddingBottom ?? 0;
+		const pl = node.layout?.paddingLeft ?? 0;
+		const padParts = [
+			pt > 0 ? `${pt}px` : "0",
+			pr > 0 ? `${pr}px` : "0",
+			pb > 0 ? `${pb}px` : "0",
+			pl > 0 ? `${pl}px` : "0"
+		];
+		if (padParts.some((p) => p !== "0")) parts.push(`padding: ${padParts.join(" ")}`);
+	} else if (spacingAnalysis) {
+		const { useGap, gap, padding } = spacingAnalysis;
+		const useSpaceBetween = shouldUseSpaceBetween(node, spacingAnalysis);
+		const gapRound = Math.round(gap);
+		if (useSpaceBetween) {
+			if (!parts.some((p) => p.startsWith("width:")) && typeof node.width === "number" && node.width > 0) parts.push(`width: ${node.width}px`);
+			parts.push("justify-content: space-between");
+		} else if (useGap && gapRound > 0) parts.push(`gap: ${gapRound}px`);
+		const padParts = [];
+		const pt = Math.round(padding.top);
+		const pr = Math.round(padding.right);
+		const pb = Math.round(padding.bottom);
+		const pl = Math.round(padding.left);
+		if (pt > 0) padParts.push(`${pt}px`);
+		else padParts.push("0");
+		if (pr > 0) padParts.push(`${pr}px`);
+		else padParts.push("0");
+		if (pb > 0) padParts.push(`${pb}px`);
+		else padParts.push("0");
+		if (pl > 0) padParts.push(`${pl}px`);
+		else padParts.push("0");
+		if (padParts.some((p) => p !== "0")) parts.push(`padding: ${padParts.join(" ")}`);
+	}
+	if (parentCtx) {
+		const hasLayoutMarginTop = typeof node.layout?.marginTop === "number";
+		const hasLayoutMarginLeft = typeof node.layout?.marginLeft === "number";
+		let mt = hasLayoutMarginTop ? Math.round(node.layout.marginTop) : 0;
+		let ml = hasLayoutMarginLeft ? Math.round(node.layout.marginLeft) : 0;
+		if (!hasLayoutMarginTop || !hasLayoutMarginLeft) {
+			const pUseGap = typeof parentCtx.parent.layout?.gap === "number" && parentCtx.parent.layout.gap > 0 || (parentCtx.useGap ?? false);
+			const pGap = typeof parentCtx.parent.layout?.gap === "number" ? parentCtx.parent.layout.gap : parentCtx.gap ?? 0;
+			const pPadding = {
+				top: parentCtx.parent.layout?.paddingTop ?? parentCtx.padding?.top ?? 0,
+				right: parentCtx.parent.layout?.paddingRight ?? parentCtx.padding?.right ?? 0,
+				bottom: parentCtx.parent.layout?.paddingBottom ?? parentCtx.padding?.bottom ?? 0,
+				left: parentCtx.parent.layout?.paddingLeft ?? parentCtx.padding?.left ?? 0
+			};
+			const margins = calcChildMargins(node, parentCtx.parent, parentCtx.prevSibling, parentCtx.isRow, pUseGap, pGap, pPadding, parentCtx.alignItems);
+			if (!hasLayoutMarginTop) mt = Math.round(margins.marginTop);
+			if (!hasLayoutMarginLeft) ml = Math.round(margins.marginLeft);
+		}
+		if (mt !== 0) parts.push(`margin-top: ${mt}px`);
+		if (ml !== 0) parts.push(`margin-left: ${ml}px`);
+	}
+	if (node.styles) {
+		for (const [key, value] of Object.entries(node.styles)) if (value !== void 0 && value !== null) {
+			const cssKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
+			parts.push(`${cssKey}: ${value}`);
+		}
+	}
+	return parts;
+}
+function collectAllStyles(node, isRoot, path, parentCtx, entries, contexts) {
+	const hasChildren = node.children && node.children.length > 0;
+	const nodeId = node.id || `node-${path}`;
+	const nodeClass = `n-${sanitizeClassName(nodeId)}`;
+	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
+	const sortedChildren = hasChildren ? [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y) : [];
+	const spacingAnalysis = hasChildren ? analyzeChildSpacing(node, sortedChildren, isRow) : void 0;
+	const styles = collectStyleParts(node, isRoot, spacingAnalysis, parentCtx);
+	entries.push(createStyleEntry(nodeId, nodeClass, styles));
+	contexts.push({
+		node,
+		nodeId,
+		nodeClass,
+		isRoot,
+		spacingAnalysis,
+		parentCtx,
+		path
+	});
+	if (hasChildren) {
+		const childCtxBase = {
+			parent: node,
+			useGap: spacingAnalysis?.useGap ?? false,
+			gap: spacingAnalysis?.gap ?? 0,
+			padding: {
+				top: spacingAnalysis?.padding?.top ?? 0,
+				right: spacingAnalysis?.padding?.right ?? 0,
+				bottom: spacingAnalysis?.padding?.bottom ?? 0,
+				left: spacingAnalysis?.padding?.left ?? 0
+			},
+			isRow,
+			alignItems: node.layout?.alignItems
+		};
+		sortedChildren.forEach((child, index) => {
+			const prev = index > 0 ? sortedChildren[index - 1] : null;
+			const childCtx = {
+				...childCtxBase,
+				prevSibling: prev
+			};
+			collectAllStyles(child, false, `${path}-${index}`, childCtx, entries, contexts);
+		});
+	}
+}
+function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode, dedupResult, path, _parentCtx, semanticTags = true) {
+	const hasChildren = node.children && node.children.length > 0;
+	const nodeId = node.id || `node-${path}`;
+	const tagInfo = semanticTags ? inferTag(node) : { tag: "div" };
+	const tag = tagInfo.tag;
+	const baseClasses = buildClassNames(node, classMode, debugMode);
+	if (tagInfo.extraClass) baseClasses.push(tagInfo.extraClass);
+	const allClasses = [...dedupResult.nodeClassMap.get(nodeId) || [], ...baseClasses].join(" ");
+	const label = includeLabels ? `<span class="layout-label">${escapeHtml(node.name || node.type)}</span>` : "";
+	let content = "";
+	if (node.characters) content = escapeHtml(node.characters);
+	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
+	const dataNodeId = nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
+	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
+	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
+	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses}"${dataNodeId}${dataType}${roleAttr}${altAttr} />`;
+	if (!hasChildren) return `<${tag} class="${allClasses}"${dataNodeId}${dataType}${roleAttr}>${label}${content}</${tag}>`;
+	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
+	const sortedChildren = [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y);
+	const spacingAnalysis = analyzeChildSpacing(node, sortedChildren, isRow);
+	const childCtxBase = {
+		parent: node,
+		useGap: spacingAnalysis?.useGap ?? false,
+		gap: spacingAnalysis?.gap ?? 0,
+		padding: {
+			top: spacingAnalysis?.padding?.top ?? 0,
+			right: spacingAnalysis?.padding?.right ?? 0,
+			bottom: spacingAnalysis?.padding?.bottom ?? 0,
+			left: spacingAnalysis?.padding?.left ?? 0
+		},
+		isRow,
+		alignItems: node.layout?.alignItems
+	};
+	return `<${tag} class="${allClasses}"${dataNodeId}${dataType}${roleAttr}>${label}${sortedChildren.map((child, index) => {
+		const prev = index > 0 ? sortedChildren[index - 1] : null;
+		const childCtx = {
+			...childCtxBase,
+			prevSibling: prev
+		};
+		return renderNodeWithDedup(child, false, includeLabels, classMode, debugMode, dedupResult, `${path}-${index}`, childCtx, semanticTags);
+	}).join("")}</${tag}>`;
+}
+function generateUniqueCssRules(dedupResult) {
+	const rules = [];
+	for (const [nodeId, styles] of dedupResult.uniqueStyles) {
+		if (styles.length === 0) continue;
+		const classNames = dedupResult.nodeClassMap.get(nodeId);
+		if (!classNames) continue;
+		const nodeClass = classNames.find((c) => c.startsWith("n-"));
+		if (!nodeClass) continue;
+		const body = styles.map((s) => `  ${s};`).join("\n");
+		rules.push(`.${nodeClass} {\n${body}\n}`);
+	}
+	return rules.join("\n\n");
+}
+function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules, path, parentCtx, semanticTags = true) {
+	const hasChildren = node.children && node.children.length > 0;
+	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
+	const sortedChildren = hasChildren ? [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y) : [];
+	const spacingAnalysis = hasChildren ? analyzeChildSpacing(node, sortedChildren, isRow) : void 0;
+	const tagInfo = semanticTags ? inferTag(node) : { tag: "div" };
+	const tag = tagInfo.tag;
+	const styleParts = collectStyleParts(node, isRoot, spacingAnalysis, parentCtx);
+	const hasStyles = styleParts.length > 0;
+	const baseClasses = buildClassNames(node, classMode, debugMode);
+	if (tagInfo.extraClass) baseClasses.push(tagInfo.extraClass);
+	const allClasses = [...baseClasses];
+	const nodeId = node.id || `node-${path}`;
+	if (hasStyles) {
+		const nodeClass = `n-${sanitizeClassName(nodeId)}`;
+		allClasses.unshift(nodeClass);
+		const cssBody = styleParts.map((p) => `  ${p};`).join("\n");
+		cssRules.push(`.${nodeClass} {\n${cssBody}\n}`);
+	}
+	const label = includeLabels ? `<span class="layout-label">${escapeHtml(node.name || node.type)}</span>` : "";
+	let content = "";
+	if (node.characters) content = escapeHtml(node.characters);
+	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
+	const dataNodeId = nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
+	if (debugMode && node.id) allClasses.push(nodeIdToClass(node.id));
+	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
+	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
+	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataType}${roleAttr}${altAttr} />`;
+	if (!hasChildren) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataType}${roleAttr}>${label}${content}</${tag}>`;
+	const childCtxBase = {
+		parent: node,
+		useGap: spacingAnalysis?.useGap ?? false,
+		gap: spacingAnalysis?.gap ?? 0,
+		padding: {
+			top: spacingAnalysis?.padding?.top ?? 0,
+			right: spacingAnalysis?.padding?.right ?? 0,
+			bottom: spacingAnalysis?.padding?.bottom ?? 0,
+			left: spacingAnalysis?.padding?.left ?? 0
+		},
+		isRow,
+		alignItems: node.layout?.alignItems
+	};
+	const childrenHtml = sortedChildren.map((child, index) => {
+		const prev = index > 0 ? sortedChildren[index - 1] : null;
+		const childCtx = {
+			...childCtxBase,
+			prevSibling: prev
+		};
+		return renderNode(child, false, includeLabels, classMode, debugMode, cssRules, `${path}-${index}`, childCtx, semanticTags);
+	}).join("");
+	return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataType}${roleAttr}>${label}${childrenHtml}</${tag}>`;
+}
+function renderLayoutToHtml(node, options = {}) {
+	const { scale = 1, rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, semanticTags = true } = options;
+	return `<div class="${rootClassName} ${formatScaleClass(scale)}">${renderNode(removeRedundantNesting(node), true, includeLabels, classMode, debugMode, [], "0", void 0, semanticTags)}</div>`;
+}
+function renderNodeAbsolute(node, isRoot, includeLabels, cssRules, path, parentX, parentY) {
+	const hasChildren = node.children && node.children.length > 0;
+	const nodeClass = `abs-${sanitizeClassName(node.id || `${node.name || "node"}-${path}` || `node-${path}`)}`;
+	const relX = node.x - parentX;
+	const relY = node.y - parentY;
+	const styleParts = [];
+	if (isRoot) styleParts.push("position:relative");
+	else {
+		styleParts.push("position:absolute");
+		styleParts.push(`left:${relX}px`);
+		styleParts.push(`top:${relY}px`);
+	}
+	if (typeof node.width === "number" && node.width > 0) styleParts.push(`width:${node.width}px`);
+	if (typeof node.height === "number" && node.height > 0) styleParts.push(`height:${node.height}px`);
+	if (node.styles) {
+		for (const [key, value] of Object.entries(node.styles)) if (value !== void 0 && value !== null) {
+			const cssKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
+			styleParts.push(`${cssKey}:${value}`);
+		}
+	}
+	cssRules.push(`.abs-node.${nodeClass}{${styleParts.join(";")}}`);
+	const classes = [
+		"abs-node",
+		hasChildren ? "is-container" : "is-leaf",
+		`type-${node.type.toLowerCase()}`,
+		nodeClass
+	].join(" ");
+	const label = includeLabels ? `<div class="abs-label">${escapeHtml(node.name || node.type)}</div>` : "";
+	let content = "";
+	if (node.characters) content = escapeHtml(node.characters);
+	const dataType = includeLabels ? ` data-type="${escapeHtml(node.type)}"` : "";
+	if (!hasChildren) return `<div class="${classes}"${dataType}>${label}${content}</div>`;
+	return `<div class="${classes}"${dataType}>${label}${node.children.map((child, index) => renderNodeAbsolute(child, false, includeLabels, cssRules, `${path}-${index}`, node.x, node.y)).join("")}</div>`;
+}
+function renderAbsoluteToHtml(node, options = {}) {
+	const { scale = 1, rootClassName = "abs-root", includeLabels = false } = options;
+	const cssRules = [];
+	const scaleClass = formatScaleClass(scale);
+	const cleanedNode = removeRedundantNesting(node);
+	return `<div class="${rootClassName} ${scaleClass}">${renderNodeAbsolute(cleanedNode, true, includeLabels, cssRules, "0", cleanedNode.x, cleanedNode.y)}</div>`;
+}
+function renderAbsolutePage(node, options = {}) {
+	const { title = "Absolute Layout", includeStyles = true, scale = 1, includeLabels = false } = options;
+	const cssRules = [];
+	const scaleClass = formatScaleClass(scale);
+	const cleanedNode = removeRedundantNesting(node);
+	const body = `<div class="abs-root ${scaleClass}">${renderNodeAbsolute(cleanedNode, true, includeLabels, cssRules, "0", cleanedNode.x, cleanedNode.y)}</div>`;
+	return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    ${includeStyles ? `<style>
+      body { margin: 0; padding: 16px; font-family: ui-sans-serif, system-ui, -apple-system; color: #333; }
+      .abs-root { position: relative; }
+      .abs-node { box-sizing: border-box; overflow: hidden; }
+      .abs-node.type-text { display: flex; align-items: center; white-space: nowrap; }
+      .abs-node.type-image, .abs-node.type-icon, .abs-node.type-vector { background: #d1d5db; }
+      .${scaleClass} { transform: scale(${scale}); transform-origin: top left; }
+      ${cssRules.join("\n")}
+    </style>` : ""}
+  </head>
+  <body>
+    ${body}
+  </body>
+</html>`;
+}
+var BASE_STYLES = `body { margin: 0; padding: 16px; }
+.layout-root { position: relative; }
+.layout-node { box-sizing: border-box; flex-shrink: 0; }
+/* 组合类：flex方向 + 交叉轴对齐 */
+.flex-row-start { display: flex; flex-direction: row; align-items: flex-start; }
+.flex-row-center { display: flex; flex-direction: row; align-items: center; }
+.flex-row-end { display: flex; flex-direction: row; align-items: flex-end; }
+.flex-col-start { display: flex; flex-direction: column; align-items: flex-start; }
+.flex-col-center { display: flex; flex-direction: column; align-items: center; }
+.flex-col-end { display: flex; flex-direction: column; align-items: flex-end; }
+/* 主轴对齐（较少使用，保留单独类） */
+.justify-center { justify-content: center; }
+.justify-end { justify-content: flex-end; }
+.justify-between { justify-content: space-between; }
+/* 按钮重置并默认居中 */
+.btn { display: inline-flex; align-items: center; justify-content: center; text-align: center; border: none; padding: 0; background: none; outline: none; appearance: none; -webkit-appearance: none; }
+/* 图片/图标占位背景 - 纯灰色，与背景渐变区分 */
+.type-image, .type-icon, .type-vector { background: #d1d5db !important; border-radius: 4px; }`;
+function renderLayoutPageWithCss(node, options = {}) {
+	const { title = "Layout Render", includeStyles = true, ...rest } = options;
+	const { rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, enableDedup = false, semanticTags = true } = rest;
+	const designWidth = node.width || 1920;
+	const cleanedNode = removeRedundantNesting(node);
+	let body;
+	let css;
+	if (enableDedup) {
+		const entries = [];
+		collectAllStyles(cleanedNode, true, "0", void 0, entries, []);
+		const dedupResult = deduplicateStyles(entries);
+		body = `<div id="layout-container" class="${rootClassName}">${renderNodeWithDedup(cleanedNode, true, includeLabels, classMode, debugMode, dedupResult, "0", void 0, semanticTags)}</div>`;
+		css = [generateSharedCss(dedupResult.sharedClasses), generateUniqueCssRules(dedupResult)].filter(Boolean).join("\n\n");
+	} else {
+		const cssRules = [];
+		body = `<div id="layout-container" class="${rootClassName}">${renderNode(cleanedNode, true, includeLabels, classMode, debugMode, cssRules, "0", void 0, semanticTags)}</div>`;
+		css = cssRules.join("\n\n");
+	}
+	const fullCss = `${BASE_STYLES}\n\n${css}`;
+	const scaleScript = `
+    <script>
+      (function() {
+        var designWidth = ${designWidth};
+        var container = document.getElementById('layout-container');
+        function updateScale() {
+          var deviceWidth = window.innerWidth - 32; // 减去 body padding
+          var scale = Math.min(deviceWidth / designWidth, 1);
+          container.style.transform = 'scale(' + scale + ')';
+          container.style.transformOrigin = 'top left';
+        }
+        updateScale();
+        window.addEventListener('resize', updateScale);
+      })();
+    <\/script>`;
+	return {
+		html: `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    ${includeStyles ? `<style>\n${fullCss}\n    </style>` : ""}
+  </head>
+  <body>
+    ${body}
+    ${scaleScript}
+  </body>
+</html>`,
+		css,
+		fullCss
+	};
+}
+function renderLayoutPage(node, options = {}) {
+	return renderLayoutPageWithCss(node, options).html;
+}
+function renderNodeWithClass(node, classNameMap, sharedClasses, includeLabels) {
+	const hasChildren = node.children && node.children.length > 0;
+	const classes = [];
+	const baseClass = classNameMap.get(node.id);
+	if (baseClass) classes.push(baseClass);
+	if (sharedClasses) {
+		const shared = sharedClasses.get(node.id);
+		if (shared) classes.push(...shared);
+	}
+	const classAttr = classes.length > 0 ? ` class="${classes.join(" ")}"` : "";
+	const label = includeLabels ? `<div class="node-label">${escapeHtml(node.name || node.type)}</div>` : "";
+	let content = "";
+	if (node.type === "TEXT" && node.characters) content = escapeHtml(node.characters);
+	else if (node.type === "IMAGE") content = "";
+	if (!hasChildren) return `<div${classAttr}>${label}${content}</div>`;
+	return `<div${classAttr}>${label}\n${node.children.map((child) => renderNodeWithClass(child, classNameMap, sharedClasses, includeLabels)).join("\n")}\n</div>`;
+}
+function renderHtmlWithClasses(node, options) {
+	const { classNameMap, sharedClasses, includeLabels = false } = options;
+	return renderNodeWithClass(removeRedundantNesting(node), classNameMap, sharedClasses, includeLabels);
+}
+function renderSeparatedPage(node, css, options) {
+	const { title = "Layout", classNameMap, sharedClasses, includeLabels = false } = options;
+	const body = renderNodeWithClass(removeRedundantNesting(node), classNameMap, sharedClasses, includeLabels);
+	return {
+		html: `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    ${body}
+  </body>
+</html>`,
+		css
+	};
 }
 function checkBackgroundOverflow(node, parent, issues, ctx) {
 	if (!parent) return;
@@ -4700,4 +5375,4 @@ function processDesign(json, options = {}) {
 		}
 	};
 }
-export { CONTAINER_TYPES, DEFAULT_COMPRESS_OPTIONS, LEAF_TYPES, PRESERVE_TYPES, TokenMatcher, analyzeChildSpacing, antdTokens, applyLayout, applyStylesToTree, calcBounds, calcChildMargins, calcChildrenMargins, checkDesign, checkLayoutTree, clusterGroups, clusterLeaves, clusterWithDBSCAN, clusterWithinContainers, collectContainers, compressDSL, convertCornerRadius, convertEffects, convertFills, convertStrokes, convertTextStyles, createTokenMatcher, deduplicateSameNameOverlaps, extractStyles, figmaColorToHex, figmaColorToRgba, filterAndPropagate, findRows, flatten, flattenToLeaves, formatDiagnostics, generateContainmentTree, generateOptimizedCss, getCompressionStats, getEffectiveBounds, getNodeOptimizedStyle, getTextBaselineWidth, hasVisualStylesForSpacing, isolateFullCoverElements, optimizeStyles, parseColorString, prefilterOverlappingLayers, preserveGroupsFlatten, printSplitResult, printStats, processDesign, processPipeline, projectionSplit, recoverContainersLayered, regroupByContainment, regroupTreeByContainment, smartFlatten, splitResultToTree, splitWithinContainers, stylesToInlineString, tailwindTokens, toJsonString, utils };
+export { CONTAINER_TYPES, DEFAULT_COMPRESS_OPTIONS, LEAF_TYPES, PRESERVE_TYPES, TokenMatcher, analyzeChildSpacing, antdTokens, applyLayout, applyStylesToTree, calcBounds, calcChildMargins, calcChildrenMargins, checkDesign, checkLayoutTree, clusterGroups, clusterLeaves, clusterWithDBSCAN, clusterWithinContainers, collectContainers, compressDSL, convertCornerRadius, convertEffects, convertFills, convertStrokes, convertTextStyles, createTokenMatcher, deduplicateSameNameOverlaps, extractStyles, figmaColorToHex, figmaColorToRgba, filterAndPropagate, findRows, flatten, flattenToLeaves, formatDiagnostics, generateContainmentTree, generateOptimizedCss, getCompressionStats, getEffectiveBounds, getNodeOptimizedStyle, getTextBaselineWidth, hasVisualStylesForSpacing, isolateFullCoverElements, optimizeStyles, parseColorString, prefilterOverlappingLayers, preserveGroupsFlatten, printSplitResult, printStats, processDesign, processPipeline, projectionSplit, recoverContainersLayered, regroupByContainment, regroupTreeByContainment, renderAbsolutePage, renderAbsoluteToHtml, renderHtmlWithClasses, renderLayoutPage, renderLayoutPageWithCss, renderLayoutToHtml, renderSeparatedPage, smartFlatten, splitResultToTree, splitWithinContainers, stylesToInlineString, tailwindTokens, toJsonString, utils };

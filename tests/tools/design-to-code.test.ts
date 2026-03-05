@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, rmSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { handleDesignToCode } from '../../src/tools/design-to-code';
 import { transform, _setTransformOverride } from '../../src/transform/index';
+import { DEFAULT_OUTPUT_MODE } from '../../src/config';
 
 const OCTO_DIR = join(process.cwd(), '.octo');
 const TEST_FILE_HOME = '__test_home__';
@@ -156,12 +157,12 @@ describe('design_to_code 列出文件', () => {
 // ============ 读取并转换 ============
 
 describe('design_to_code 读取转换', () => {
-  it('默认 outputMode 为 html', async () => {
+  it(`默认 outputMode 为 ${DEFAULT_OUTPUT_MODE}`, async () => {
     const result = await handleDesignToCode({ file: TEST_FILE_HOME });
     expect(result.isError).toBeUndefined();
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
-    expect(first.text).toContain('html');
+    expect(first.text).toContain(DEFAULT_OUTPUT_MODE);
     expect(first.text).toContain(`${TEST_FILE_HOME}.json`);
   });
 
@@ -242,9 +243,10 @@ describe('transform 布局引擎集成', () => {
     expect(result.content).not.toContain('data-design-root');
   });
 
-  it('HTML 输出包含内联样式', () => {
+  it('HTML 输出包含 class 属性（来自 core.js renderLayoutToHtml）', () => {
     const result = transform(MINIMAL_FIGMA_JSON, 'html');
-    expect(result.content).toContain('style=');
+    expect(result.content).toContain('class=');
+    expect(result.content).toContain('layout-root');
   });
 
   it('识别出 INSTANCE 节点中的组件名', () => {

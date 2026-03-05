@@ -76,10 +76,17 @@ function formatTransformOutput(
   lines.push(`输出格式：${outputMode}\n`);
 
   if (outputMode === 'html') {
-    lines.push('## 设计稿 HTML\n');
+    lines.push('## 设计稿 HTML（仅供参考）\n');
     lines.push('```html');
     lines.push(content);
     lines.push('```');
+    lines.push('');
+    lines.push('## 转写要求\n');
+    lines.push('以上 HTML 是设计稿的视觉参考，**禁止直接复制到代码中**。你需要：');
+    lines.push('1. 转写为 React JSX 组件，使用普通 CSS 文件管理样式');
+    lines.push('2. 将 inline style 提取为语义化的 CSS class（如 `.header`、`.title`、`.card`）');
+    lines.push('3. 使用语义化标签（`header`、`section`、`h1` 等）替代无意义的 `div`');
+    lines.push('4. 尺寸单位根据需要转换（px → rem 或响应式布局）');
   } else {
     lines.push('## 设计稿 DSL\n');
     lines.push('```json');
@@ -133,7 +140,7 @@ export const designToCodeTool: Tool = {
     '将 .octo/ 目录下的设计稿 JSON 转换为精简 DSL 或语义化 HTML，自动推断 flex 布局和 CSS 样式，识别 my-design 组件并联动返回 Props 规范。\n\n' +
     '- 不传 file：列出 .octo/ 下所有可用文件名\n' +
     '- 传 file + outputMode：转换指定设计稿，返回结构化数据 + 组件规范（如有匹配）\n\n' +
-    '流程：design_to_code({ file: "index" }) → 拿到 HTML + 组件规范 → 直接转写为 React 代码',
+    '流程：design_to_code({ file: "index" }) → 拿到设计稿数据 + 组件规范 → 直接生成 React 代码',
   inputSchema: {
     type: 'object',
     properties: {
@@ -147,7 +154,7 @@ export const designToCodeTool: Tool = {
         type: 'string',
         enum: ['dsl', 'html'],
         description:
-          '输出格式。html: 语义化 HTML（推荐，AI 可直接理解布局结构）；dsl: 精简 JSON（token 少但需额外理解字段映射）。默认 html。',
+          `输出格式。html: 语义化 HTML（AI 可直接理解布局结构）；dsl: 精简 JSON（token 少）。默认 ${DEFAULT_OUTPUT_MODE}。`,
       },
     },
   },

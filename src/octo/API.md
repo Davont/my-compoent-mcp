@@ -269,8 +269,10 @@ import { compressDSL, toJsonString, getCompressionStats, printStats } from './di
 // 压缩为 AI DSL（删除冗余字段、缩写 key、颜色转 hex、数值去 px）
 const compressed = compressDSL(styledTree);
 
-// 输出 JSON 字符串（true = minify，省 token）
-const json = toJsonString(compressed, true);
+// 输出 JSON 字符串（默认 minify，无空格无换行，省 token）
+const json = toJsonString(compressed);
+// 需要可读格式时传 false
+const prettyJson = toJsonString(compressed, false);
 
 // 查看压缩统计
 const stats = getCompressionStats(styledTree, compressed);
@@ -326,6 +328,37 @@ interface CompressedNode {
   };
   children?: CompressedNode[];
 }
+```
+
+---
+
+#### Phase 8：HTML 渲染
+
+将 LayoutNode 树渲染为可直接使用的 HTML：
+
+```ts
+import { renderLayoutPage, renderLayoutPageWithCss, renderAbsolutePage } from './dist/core.js';
+
+// 渲染为完整 HTML 页面（内联样式）
+const html = renderLayoutPage(styledTree);
+
+// 渲染为 HTML + 独立 CSS（样式去重，生成共享 class）
+const { html, css } = renderLayoutPageWithCss(styledTree);
+
+// 渲染为绝对定位 HTML（1:1 还原 Figma 坐标）
+const absoluteHtml = renderAbsolutePage(styledTree);
+```
+
+配置选项：
+
+```ts
+const html = renderLayoutPage(tree, {
+  title: '页面标题',           // HTML <title>
+  width: 375,                  // 视口宽度
+  height: 812,                 // 视口高度
+  includeReset: true,          // 包含 CSS reset
+  useRelativeUnits: false,     // 使用相对单位（rem）
+});
 ```
 
 ---
@@ -441,9 +474,9 @@ ProcessDesignResult
     ├─ stages: 各阶段中间快照
     └─ stats:  过滤统计
     │
-    ▼ (可选)
-compressDSL(tree) → toJsonString()
+    ├──▶ (可选) Phase 7: compressDSL → toJsonString()
+    │       → AI DSL JSON（压缩后的精简格式，默认 minify）
     │
-    ▼
-AI DSL JSON（压缩后的精简格式，适合喂给 AI）
+    └──▶ (可选) Phase 8: renderLayoutPage / renderLayoutPageWithCss
+            → 完整 HTML 页面（内联样式 / HTML + CSS 分离）
 ```

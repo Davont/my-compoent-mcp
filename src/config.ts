@@ -64,4 +64,4 @@ export const ENV_OCTO_DIR = 'OCTO_DIR';
  * - 'html': 语义化 HTML（AI 可直接理解布局，推荐弱模型）
  * - 'dsl':  精简 JSON（token 少，适合强模型）
  */
-export const DEFAULT_OUTPUT_MODE: 'html' | 'dsl' = 'html';
+export const DEFAULT_OUTPUT_MODE: 'html' | 'dsl' = 'dsl';
