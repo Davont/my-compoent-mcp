@@ -25,22 +25,34 @@ const __dirname = dirname(__filename);
 const SAFE_FILENAME_RE = /^[\w-]+$/;
 
 /**
+ * 从 startDir 向上查找包含 package.json 的目录（即项目根目录）
+ */
+function findProjectRoot(startDir: string): string | null {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(join(dir, 'package.json'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
  * 获取 .octo/ 目录的绝对路径
- * 优先级：环境变量 OCTO_DIR > __dirname 相对路径 > process.cwd()
+ * 优先级：环境变量 OCTO_DIR > 项目根目录（从 __dirname 向上找 package.json）> process.cwd()
  */
 function getOctoDir(): string {
   const envDir = process.env[ENV_OCTO_DIR];
   if (envDir) return envDir;
 
-  const candidates = [
-    join(__dirname, '../.octo'),
-    join(__dirname, '../../.octo'),
-    join(process.cwd(), '.octo'),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
+  const projectRoot = findProjectRoot(__dirname);
+  if (projectRoot) {
+    const octo = join(projectRoot, '.octo');
+    if (existsSync(octo)) return octo;
   }
-  return candidates[0];
+
+  return join(process.cwd(), '.octo');
 }
 
 /**
@@ -242,7 +254,7 @@ export async function handleDesignToCode(
       return {
         content: [{
           type: 'text',
-          text: `未找到设计稿文件 "${file}.json"。\n可用文件：${availableStr}`,
+          text: `未找到设计稿文件 "${file}.json"（查找路径：${octoDir}）。\n可用文件：${availableStr}`,
         }],
         isError: true,
       };
