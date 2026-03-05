@@ -266,10 +266,10 @@ export const getContextBundleTool: Tool = {
   description:
     '聚合工具：一次返回多个组件的完整上下文（Props 接口、核心规则、示例）。\n' +
     '替代多次单独调用 component_details / theme_tokens。\n\n' +
+    '⚠️ 禁止在设计稿场景中首先调用本工具。当用户提到 .octo、设计稿、Figma 时，必须先调用 design_to_code 获取设计稿数据，design_to_code 已内置组件识别。本工具仅用于 design_to_code 之后补充组件信息。\n\n' +
     '两种使用方式：\n' +
     '- components: 传组件名列表，精准获取（如 ["Button", "Input"]）\n' +
-    '- query: 传关键词搜索，自动匹配相关组件（如 "表单"）\n\n' +
-    '推荐在生成页面代码前优先调用此工具。',
+    '- query: 传关键词搜索，自动匹配相关组件（如 "表单"）',
   inputSchema: {
     type: 'object',
     properties: {

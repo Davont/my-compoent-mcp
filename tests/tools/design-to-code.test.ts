@@ -156,12 +156,12 @@ describe('design_to_code 列出文件', () => {
 // ============ 读取并转换 ============
 
 describe('design_to_code 读取转换', () => {
-  it('默认 outputMode 为 dsl', async () => {
+  it('默认 outputMode 为 html', async () => {
     const result = await handleDesignToCode({ file: TEST_FILE_HOME });
     expect(result.isError).toBeUndefined();
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
-    expect(first.text).toContain('dsl');
+    expect(first.text).toContain('html');
     expect(first.text).toContain(`${TEST_FILE_HOME}.json`);
   });
 
@@ -185,11 +185,12 @@ describe('design_to_code 读取转换', () => {
     expect(first.text).toContain('html');
   });
 
-  it('无推荐组件时末尾包含手动调用提示', async () => {
+  it('无推荐组件时包含不要导入组件的警告', async () => {
     const result = await handleDesignToCode({ file: TEST_FILE_HOME, outputMode: 'dsl' });
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
-    expect(first.text).toContain('get_context_bundle');
+    expect(first.text).toContain('未识别到');
+    expect(first.text).toContain('不要从');
   });
 });
 
@@ -281,11 +282,11 @@ describe('design_to_code 联动组件规范', () => {
     expect(first.text).toContain('get_context_bundle');
   });
 
-  it('无推荐组件时走降级路径，提示手动调用', async () => {
+  it('无推荐组件时走降级路径，提示不要导入组件', async () => {
     const result = await handleDesignToCode({ file: TEST_FILE_HOME, outputMode: 'dsl' });
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
-    expect(first.text).toContain('get_context_bundle');
+    expect(first.text).toContain('未识别到');
     expect(first.text).not.toContain('全部上下文');
   });
 

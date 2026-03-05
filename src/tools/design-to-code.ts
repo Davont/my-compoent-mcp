@@ -12,22 +12,35 @@
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, readdirSync, readFileSync } from 'fs';
-import { join, resolve, basename, sep } from 'path';
+import { join, resolve, basename, sep, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { transform, TransformMode } from '../transform/index.js';
 import { handleGetContextBundle } from './get-context-bundle.js';
-import { ENV_OCTO_DIR } from '../config.js';
+import { ENV_OCTO_DIR, DEFAULT_OUTPUT_MODE } from '../config.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // 只允许文件名中出现字母、数字、连字符、下划线，防止路径穿越
 const SAFE_FILENAME_RE = /^[\w-]+$/;
 
 /**
  * 获取 .octo/ 目录的绝对路径
- * 优先读取环境变量 OCTO_DIR，回退到 process.cwd()/.octo
+ * 优先级：环境变量 OCTO_DIR > __dirname 相对路径 > process.cwd()
  */
 function getOctoDir(): string {
   const envDir = process.env[ENV_OCTO_DIR];
   if (envDir) return envDir;
-  return join(process.cwd(), '.octo');
+
+  const candidates = [
+    join(__dirname, '../.octo'),
+    join(__dirname, '../../.octo'),
+    join(process.cwd(), '.octo'),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return candidates[0];
 }
 
 /**
@@ -66,7 +79,8 @@ function formatTransformOutput(
   fileName: string,
   outputMode: TransformMode,
   content: string,
-  componentBundle?: string | null
+  componentBundle?: string | null,
+  recommendedComponents?: string[]
 ): string {
   const lines: string[] = [];
   const modeLabel = outputMode === 'html' ? 'HTML' : '简化 DSL';
@@ -91,6 +105,19 @@ function formatTransformOutput(
     lines.push('> INSTANCE 节点对应 my-design 组件');
   }
 
+  lines.push('');
+  lines.push('---');
+  lines.push('## 组件识别结果\n');
+  if (recommendedComponents && recommendedComponents.length > 0) {
+    lines.push(`识别到的 my-design 组件：${recommendedComponents.map(c => `\`${c}\``).join('、')}`);
+    lines.push('');
+    lines.push('⚠️ **只有以上列出的组件才能从 @my-design/react 导入。** DSL 中的其他 name（如 StatusBar、TitleBar 等）是设计稿图层名，不是组件库组件，必须用普通 HTML/CSS（div、span 等）实现。');
+  } else {
+    lines.push('未识别到 my-design 组件。');
+    lines.push('');
+    lines.push('⚠️ **不要从 @my-design/react 导入任何组件。** DSL 中的 name 字段是设计稿图层名，不是组件库组件名。全部使用普通 HTML/CSS 实现。');
+  }
+
   if (componentBundle) {
     lines.push('');
     lines.push('---');
@@ -99,10 +126,10 @@ function formatTransformOutput(
     lines.push('');
     lines.push('---');
     lines.push('> 以上是生成代码所需的全部上下文，请直接基于设计稿数据和组件规范生成代码。');
-  } else {
+  } else if (recommendedComponents && recommendedComponents.length > 0) {
     lines.push('');
     lines.push('---');
-    lines.push('> 下一步：调用 `get_context_bundle` 获取相关组件上下文，结合以上设计稿数据生成符合 my-design 规范的代码。');
+    lines.push('> 下一步：调用 `get_context_bundle` 获取以上识别到的组件的详细规范。');
   }
 
   return lines.join('\n');
@@ -113,10 +140,13 @@ function formatTransformOutput(
 export const designToCodeTool: Tool = {
   name: 'design_to_code',
   description:
-    '将 Octo 设计稿转换为精简 DSL 或语义化 HTML，自动推断 flex 布局和 CSS 样式，识别 my-design 组件并联动返回 Props 规范。\n\n' +
+    '【设计稿转代码的唯一入口】当用户提到 .octo、index.json、设计稿、Figma、Octo，或要求"转化/转换/生成 前端页面代码"时，必须首先调用本工具。' +
+    '无需先调用 get_context_bundle 或 component_search，本工具已内置 my-design 组件识别和规范获取。\n\n' +
+    '⚠️ 禁止用 read_file 直接读取 .octo/ 下的 JSON 文件（文件极大，会浪费 token）。直接调用本工具即可，工具内部自动读取、解析、转换。\n\n' +
+    '将 .octo/ 目录下的设计稿 JSON 转换为精简 DSL 或语义化 HTML，自动推断 flex 布局和 CSS 样式，识别 my-design 组件并联动返回 Props 规范。\n\n' +
     '- 不传 file：列出 .octo/ 下所有可用文件名\n' +
-    '- 传 file：转换指定设计稿，返回结构化数据 + 组件规范（如有匹配）\n\n' +
-    '推荐流程：design_to_code → 获取 DSL + 组件规范 → 生成 React 代码 → 如需补充调用 get_context_bundle',
+    '- 传 file + outputMode：转换指定设计稿，返回结构化数据 + 组件规范（如有匹配）\n\n' +
+    '流程：design_to_code({ file: "index" }) → 拿到 HTML + 组件规范 → 直接转写为 React 代码',
   inputSchema: {
     type: 'object',
     properties: {
@@ -130,7 +160,7 @@ export const designToCodeTool: Tool = {
         type: 'string',
         enum: ['dsl', 'html'],
         description:
-          '输出格式。dsl: 精简 JSON（推荐，token 少，结构清晰）；html: 语义化 HTML（带内联样式）。默认 dsl。',
+          '输出格式。html: 语义化 HTML（推荐，AI 可直接理解布局结构）；dsl: 精简 JSON（token 少但需额外理解字段映射）。默认 html。',
       },
     },
   },
@@ -142,8 +172,8 @@ export async function handleDesignToCode(
   args: Record<string, unknown>
 ): Promise<CallToolResult> {
   const file = typeof args?.file === 'string' ? args.file.trim() : undefined;
-  const rawMode = typeof args?.outputMode === 'string' ? args.outputMode : 'dsl';
-  const outputMode: TransformMode = rawMode === 'html' ? 'html' : 'dsl';
+  const rawMode = typeof args?.outputMode === 'string' ? args.outputMode : DEFAULT_OUTPUT_MODE;
+  const outputMode: TransformMode = rawMode === 'dsl' ? 'dsl' : 'html';
 
   const octoDir = getOctoDir();
 
@@ -269,7 +299,7 @@ export async function handleDesignToCode(
     }
   }
 
-  const output = formatTransformOutput(file, result.mode, result.content, componentBundle);
+  const output = formatTransformOutput(file, result.mode, result.content, componentBundle, recommended);
   return {
     content: [{ type: 'text', text: output }],
   };

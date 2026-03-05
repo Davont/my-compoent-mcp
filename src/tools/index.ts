@@ -28,13 +28,13 @@ import { handleGetFunctionCode } from './get-function-code.js';
  * 对外公开的工具列表（ListTools 返回此数组）
  */
 export const tools: Tool[] = [
+  designToCodeTool,
   getContextBundleTool,
   componentSearchTool,
   componentDetailsTool,
   themeTokensTool,
   changelogQueryTool,
   sourceInspectTool,
-  designToCodeTool,
 ];
 
 /**

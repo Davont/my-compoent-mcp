@@ -58,3 +58,10 @@ export const ENV_PACKAGE_ROOT_LEGACY = 'MY_DESIGN_PACKAGE_ROOT';
  * 示例：OCTO_DIR=/Users/xxx/my-project/.octo
  */
 export const ENV_OCTO_DIR = 'OCTO_DIR';
+
+/**
+ * design_to_code 工具的默认输出格式
+ * - 'html': 语义化 HTML（AI 可直接理解布局，推荐弱模型）
+ * - 'dsl':  精简 JSON（token 少，适合强模型）
+ */
+export const DEFAULT_OUTPUT_MODE: 'html' | 'dsl' = 'html';

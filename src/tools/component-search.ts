@@ -13,7 +13,7 @@ import { LIBRARY_DISPLAY_NAME } from '../config.js';
  */
 export const componentSearchTool: Tool = {
   name: 'component_search',
-  description: `搜索 ${LIBRARY_DISPLAY_NAME} 组件库的组件。适用于只需查找特定组件名称的场景。如果目标是生成页面代码，优先使用 get_context_bundle 工具（支持 components 精准获取或 query 关键词搜索）。本工具适合需要单独查找组件名时的补充调用。`,
+  description: `搜索 ${LIBRARY_DISPLAY_NAME} 组件库的组件。适用于只需查找特定组件名称的场景。如果用户要求基于设计稿（.octo）生成代码，应先调用 design_to_code。如果目标是生成页面代码，优先使用 get_context_bundle 工具。本工具适合需要单独查找组件名时的补充调用。`,
   inputSchema: {
     type: 'object',
     properties: {
