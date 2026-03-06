@@ -81,11 +81,11 @@ function formatTransformOutput(opts: FormatOptions): string {
   lines.push(`输出格式：${outputMode}\n`);
 
   if (outputMode === 'html' && css && jsx) {
-    lines.push('## 文件 1：styles.css（直接复制，禁止修改）\n');
+    lines.push('## 文件 1：styles.css\n');
     lines.push('```css');
     lines.push(css);
     lines.push('```\n');
-    lines.push('## 文件 2：Page.tsx（直接复制，禁止修改）\n');
+    lines.push('## 文件 2：Page.tsx\n');
     lines.push('```tsx');
     lines.push("import React from 'react';");
     lines.push("import './styles.css';\n");
@@ -95,21 +95,9 @@ function formatTransformOutput(opts: FormatOptions): string {
     lines.push('  );');
     lines.push('}');
     lines.push('```\n');
-    lines.push('## 执行步骤（必须严格按顺序）\n');
-    lines.push('### 第一步：原封不动复制\n');
-    lines.push('将以上两个文件**逐字复制**到项目中，确认页面可正常渲染。');
-    lines.push('- 禁止修改任何 CSS 类名和样式值');
-    lines.push('- 禁止修改 DOM 结构和标签层级');
-    lines.push('- 禁止删除或合并任何元素\n');
-    lines.push('### 第二步：按需改造（在第一步基础上）\n');
-    lines.push('在已能正常运行的代码上，做以下**小范围**调整：');
-    lines.push('1. **替换组件**：将匹配的 `<div>`/`<span>` 替换为下方识别到的组件库组件（如 `<Switch>`、`<Button>`），保留原有 className');
-    lines.push('2. **语义化类名**：参考 `data-name` 属性理解每个节点的含义，将 `n-33-xxx` 等自动生成的类名重命名为语义化名称（如 `status-bar`、`card-title`），CSS 中同步修改');
-    lines.push('3. **删除 data-name**：语义化完成后，删除所有 `data-name="..."` 属性，最终代码中不应保留');
-    lines.push('4. **添加交互**：为按钮、表单等元素添加 onClick、onChange 等事件处理');
-    lines.push('5. **数据绑定**：将硬编码的文本替换为 props 或 state 变量');
-    lines.push('');
-    lines.push('> 每次只改一处，改完确认不影响渲染后再改下一处。');
+    lines.push('> ⚠️ **必须严格按顺序完成以下全部步骤：**');
+    lines.push('> 1. **先复制**：将以上 styles.css 和 Page.tsx 的代码**逐字原样**写入项目文件，禁止修改任何内容');
+    lines.push('> 2. **再改造**：只改 `n-` 开头的类名（参考 `data-name` 语义化），`s-` 开头的共享类和布局类（flex-row-start 等）禁止修改。删除所有 `data-name`。不要改样式值');
   } else if (outputMode === 'html') {
     lines.push('## 设计稿 HTML\n');
     lines.push('```html');
@@ -168,7 +156,14 @@ export const designToCodeTool: Tool = {
     '将 .octo/ 目录下的设计稿 JSON 转换为精简 DSL 或 React 脚手架（CSS + JSX），自动推断 flex 布局和 CSS 样式，识别组件库组件并联动返回 Props 规范。\n\n' +
     '- 不传 file：列出 .octo/ 下所有可用文件名\n' +
     '- 传 file + outputMode：转换指定设计稿，返回结构化数据 + 组件规范（如有匹配）\n\n' +
-    '流程：design_to_code({ file: "index" }) → 拿到设计稿数据 + 组件规范 → 直接生成 React 代码',
+    '⚠️ 调用本工具后，必须完成以下全部步骤才算任务完成，缺少任何一步都不算完成：\n\n' +
+    '第一步（复制写入）：将返回的 styles.css 和 Page.tsx 逐字原样写入项目文件，禁止修改任何内容。\n\n' +
+    '第二步（语义化改造）：在已写入的文件上修改：\n' +
+    '  a. 只改 n- 开头的独立类名（如 n-33-946、n-rel-33-945、n-split-33-xxx）：参考对应元素的 data-name 属性理解其含义，替换为语义化名称（如 task-goal、title-bar）。styles.css 中的选择器同步修改，样式值保持不变\n' +
+    '  b. s- 开头的共享类名（如 s-729846、s-02dea1）是多个元素共用的，禁止修改、禁止拆分、禁止重命名\n' +
+    '  c. layout-node、flex-row-start、flex-col-center、btn、text、icon、vector 等布局类禁止修改\n' +
+    '  d. 删除所有 data-name 属性\n\n' +
+    '只有第一步和第二步全部完成，才能结束任务。不要替换组件库组件，不要添加交互事件，不要修改任何 CSS 样式值。',
   inputSchema: {
     type: 'object',
     properties: {

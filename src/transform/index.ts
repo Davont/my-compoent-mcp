@@ -115,10 +115,11 @@ export function transform(json: unknown, mode: TransformMode): TransformResult {
  * 从完整 HTML 页面中提取 body 内的 DOM，转换为 JSX 兼容格式。
  * - class= → className=
  * - 去掉 <div id="layout-container"> 外壳
+ * - 格式化缩进，方便 AI 阅读
  */
 function htmlBodyToJsx(html: string): string {
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  if (!bodyMatch) return html.replace(/ class=/g, ' className=');
+  if (!bodyMatch) return formatHtml(html.replace(/ class=/g, ' className='));
 
   let body = bodyMatch[1]
     .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -132,7 +133,45 @@ function htmlBodyToJsx(html: string): string {
     body = `<div className="${rootClasses}">${containerMatch[2]}</div>`;
   }
 
-  return body.replace(/ class=/g, ' className=');
+  return formatHtml(body.replace(/ class=/g, ' className='));
+}
+
+/**
+ * 将压缩的 HTML 字符串格式化为带缩进的多行格式。
+ * 纯正则实现，不依赖外部库。
+ */
+function formatHtml(html: string): string {
+  const tokens = html.match(/<[^>]+>|[^<]+/g);
+  if (!tokens) return html;
+
+  const lines: string[] = [];
+  let depth = 0;
+  const INDENT = '  ';
+  const SELF_CLOSING = /\/\s*>$/;
+  const CLOSING_TAG = /^<\//;
+  const VOID_ELEMENTS = /^<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b/i;
+
+  for (const token of tokens) {
+    const trimmed = token.trim();
+    if (!trimmed) continue;
+
+    if (!trimmed.startsWith('<')) {
+      lines.push(INDENT.repeat(depth) + trimmed);
+      continue;
+    }
+
+    if (CLOSING_TAG.test(trimmed)) {
+      depth = Math.max(0, depth - 1);
+      lines.push(INDENT.repeat(depth) + trimmed);
+    } else if (SELF_CLOSING.test(trimmed) || VOID_ELEMENTS.test(trimmed)) {
+      lines.push(INDENT.repeat(depth) + trimmed);
+    } else {
+      lines.push(INDENT.repeat(depth) + trimmed);
+      depth++;
+    }
+  }
+
+  return lines.join('\n');
 }
 
 /**
