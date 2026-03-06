@@ -82,6 +82,7 @@ export function transform(json: unknown, mode: TransformMode): TransformResult {
         semanticTags: true,
         enableDedup: true,
         includeNodeId: false,
+        includeNodeName: true,
       });
 
       const css = cleanCssForReact(pageResult.fullCss);

@@ -104,9 +104,10 @@ function formatTransformOutput(opts: FormatOptions): string {
     lines.push('### 第二步：按需改造（在第一步基础上）\n');
     lines.push('在已能正常运行的代码上，做以下**小范围**调整：');
     lines.push('1. **替换组件**：将匹配的 `<div>`/`<span>` 替换为下方识别到的组件库组件（如 `<Switch>`、`<Button>`），保留原有 className');
-    lines.push('2. **语义化类名**：将 `n-33-xxx` 等自动生成的类名重命名为语义化名称（如 `status-bar`、`card-title`），CSS 中同步修改');
-    lines.push('3. **添加交互**：为按钮、表单等元素添加 onClick、onChange 等事件处理');
-    lines.push('4. **数据绑定**：将硬编码的文本替换为 props 或 state 变量');
+    lines.push('2. **语义化类名**：参考 `data-name` 属性理解每个节点的含义，将 `n-33-xxx` 等自动生成的类名重命名为语义化名称（如 `status-bar`、`card-title`），CSS 中同步修改');
+    lines.push('3. **删除 data-name**：语义化完成后，删除所有 `data-name="..."` 属性，最终代码中不应保留');
+    lines.push('4. **添加交互**：为按钮、表单等元素添加 onClick、onChange 等事件处理');
+    lines.push('5. **数据绑定**：将硬编码的文本替换为 props 或 state 变量');
     lines.push('');
     lines.push('> 每次只改一处，改完确认不影响渲染后再改下一处。');
   } else if (outputMode === 'html') {

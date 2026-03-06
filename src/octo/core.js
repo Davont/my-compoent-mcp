@@ -4584,7 +4584,7 @@ function collectAllStyles(node, isRoot, path, parentCtx, entries, contexts) {
 		});
 	}
 }
-function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode, dedupResult, path, _parentCtx, semanticTags = true, includeNodeId = true) {
+function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode, dedupResult, path, _parentCtx, semanticTags = true, includeNodeId = true, includeNodeName = false) {
 	const hasChildren = node.children && node.children.length > 0;
 	const nodeId = node.id || `node-${path}`;
 	const tagInfo = semanticTags ? inferTag(node) : { tag: "div" };
@@ -4597,10 +4597,11 @@ function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode,
 	if (node.characters) content = escapeHtml(node.characters);
 	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
 	const dataNodeId = includeNodeId && nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
+	const dataName = includeNodeName && node.name ? ` data-name="${escapeHtml(node.name)}"` : "";
 	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
 	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
-	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses}"${dataNodeId}${dataType}${roleAttr}${altAttr} />`;
-	if (!hasChildren) return `<${tag} class="${allClasses}"${dataNodeId}${dataType}${roleAttr}>${label}${content}</${tag}>`;
+	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses}"${dataNodeId}${dataName}${dataType}${roleAttr}${altAttr} />`;
+	if (!hasChildren) return `<${tag} class="${allClasses}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${content}</${tag}>`;
 	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
 	const sortedChildren = [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y);
 	const spacingAnalysis = analyzeChildSpacing(node, sortedChildren, isRow);
@@ -4617,13 +4618,13 @@ function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode,
 		isRow,
 		alignItems: node.layout?.alignItems
 	};
-	return `<${tag} class="${allClasses}"${dataNodeId}${dataType}${roleAttr}>${label}${sortedChildren.map((child, index) => {
+	return `<${tag} class="${allClasses}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${sortedChildren.map((child, index) => {
 		const prev = index > 0 ? sortedChildren[index - 1] : null;
 		const childCtx = {
 			...childCtxBase,
 			prevSibling: prev
 		};
-		return renderNodeWithDedup(child, false, includeLabels, classMode, debugMode, dedupResult, `${path}-${index}`, childCtx, semanticTags, includeNodeId);
+		return renderNodeWithDedup(child, false, includeLabels, classMode, debugMode, dedupResult, `${path}-${index}`, childCtx, semanticTags, includeNodeId, includeNodeName);
 	}).join("")}</${tag}>`;
 }
 function generateUniqueCssRules(dedupResult) {
@@ -4639,7 +4640,7 @@ function generateUniqueCssRules(dedupResult) {
 	}
 	return rules.join("\n\n");
 }
-function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules, path, parentCtx, semanticTags = true, includeNodeId = true) {
+function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules, path, parentCtx, semanticTags = true, includeNodeId = true, includeNodeName = false) {
 	const hasChildren = node.children && node.children.length > 0;
 	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
 	const sortedChildren = hasChildren ? [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y) : [];
@@ -4663,11 +4664,12 @@ function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules,
 	if (node.characters) content = escapeHtml(node.characters);
 	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
 	const dataNodeId = includeNodeId && nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
+	const dataName = includeNodeName && node.name ? ` data-name="${escapeHtml(node.name)}"` : "";
 	if (debugMode && node.id) allClasses.push(nodeIdToClass(node.id));
 	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
 	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
-	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataType}${roleAttr}${altAttr} />`;
-	if (!hasChildren) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataType}${roleAttr}>${label}${content}</${tag}>`;
+	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataName}${dataType}${roleAttr}${altAttr} />`;
+	if (!hasChildren) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${content}</${tag}>`;
 	const childCtxBase = {
 		parent: node,
 		useGap: spacingAnalysis?.useGap ?? false,
@@ -4687,13 +4689,13 @@ function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules,
 			...childCtxBase,
 			prevSibling: prev
 		};
-		return renderNode(child, false, includeLabels, classMode, debugMode, cssRules, `${path}-${index}`, childCtx, semanticTags, includeNodeId);
+		return renderNode(child, false, includeLabels, classMode, debugMode, cssRules, `${path}-${index}`, childCtx, semanticTags, includeNodeId, includeNodeName);
 	}).join("");
-	return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataType}${roleAttr}>${label}${childrenHtml}</${tag}>`;
+	return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${childrenHtml}</${tag}>`;
 }
 function renderLayoutToHtml(node, options = {}) {
-	const { scale = 1, rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, semanticTags = true, includeNodeId = true } = options;
-	return `<div class="${rootClassName} ${formatScaleClass(scale)}">${renderNode(removeRedundantNesting(node), true, includeLabels, classMode, debugMode, [], "0", void 0, semanticTags, includeNodeId)}</div>`;
+	const { scale = 1, rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, semanticTags = true, includeNodeId = true, includeNodeName = false } = options;
+	return `<div class="${rootClassName} ${formatScaleClass(scale)}">${renderNode(removeRedundantNesting(node), true, includeLabels, classMode, debugMode, [], "0", void 0, semanticTags, includeNodeId, includeNodeName)}</div>`;
 }
 function renderNodeAbsolute(node, isRoot, includeLabels, cssRules, path, parentX, parentY) {
 	const hasChildren = node.children && node.children.length > 0;
@@ -4783,7 +4785,7 @@ var BASE_STYLES = `body { margin: 0; padding: 16px; }
 .type-image, .type-icon, .type-vector { background: #d1d5db !important; border-radius: 4px; }`;
 function renderLayoutPageWithCss(node, options = {}) {
 	const { title = "Layout Render", includeStyles = true, ...rest } = options;
-	const { rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, enableDedup = false, semanticTags = true, includeNodeId = true } = rest;
+	const { rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, enableDedup = false, semanticTags = true, includeNodeId = true, includeNodeName = false } = rest;
 	const designWidth = node.width || 1920;
 	const cleanedNode = removeRedundantNesting(node);
 	let body;
@@ -4792,11 +4794,11 @@ function renderLayoutPageWithCss(node, options = {}) {
 		const entries = [];
 		collectAllStyles(cleanedNode, true, "0", void 0, entries, []);
 		const dedupResult = deduplicateStyles(entries);
-		body = `<div id="layout-container" class="${rootClassName}">${renderNodeWithDedup(cleanedNode, true, includeLabels, classMode, debugMode, dedupResult, "0", void 0, semanticTags, includeNodeId)}</div>`;
+		body = `<div id="layout-container" class="${rootClassName}">${renderNodeWithDedup(cleanedNode, true, includeLabels, classMode, debugMode, dedupResult, "0", void 0, semanticTags, includeNodeId, includeNodeName)}</div>`;
 		css = [generateSharedCss(dedupResult.sharedClasses), generateUniqueCssRules(dedupResult)].filter(Boolean).join("\n\n");
 	} else {
 		const cssRules = [];
-		body = `<div id="layout-container" class="${rootClassName}">${renderNode(cleanedNode, true, includeLabels, classMode, debugMode, cssRules, "0", void 0, semanticTags, includeNodeId)}</div>`;
+		body = `<div id="layout-container" class="${rootClassName}">${renderNode(cleanedNode, true, includeLabels, classMode, debugMode, cssRules, "0", void 0, semanticTags, includeNodeId, includeNodeName)}</div>`;
 		css = cssRules.join("\n\n");
 	}
 	const fullCss = `${BASE_STYLES}\n\n${css}`;

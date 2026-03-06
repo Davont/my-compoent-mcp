@@ -361,6 +361,8 @@ export interface RenderOptions {
 	semanticTags?: boolean;
 	/** 输出 data-node-id 属性，默认 true（精度测试需要），打包产物可关闭 */
 	includeNodeId?: boolean;
+	/** 输出 data-name 属性（值为 Figma 图层名 node.name），默认 false */
+	includeNodeName?: boolean;
 }
 export interface RenderPageOptions extends RenderOptions {
 	title?: string;

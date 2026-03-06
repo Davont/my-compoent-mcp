@@ -269,13 +269,8 @@ async function main() {
 ║    GET    /mcp      SSE 流 (服务器推送)                              ║
 ║    GET    /health   健康检查                                         ║
 ║                                                                      ║
-║  可用工具:                                                           ║
-║    - get_context_bundle  获取组件上下文（核心工具）                  ║
-║    - component_search    搜索组件                                    ║
-║    - component_details   获取组件详情                                ║
-║    - theme_tokens        获取 Design Token                           ║
-║    - changelog_query     查询变更日志                                ║
-║    - source_inspect      查看组件源码                                ║
+║  可用工具 (${tools.length}):                                                          ║
+${tools.map(t => `║    - ${t.name.padEnd(56)}║`).join('\n')}
 ╚══════════════════════════════════════════════════════════════════════╝
 `);
   });
