@@ -15,7 +15,8 @@ import { changelogQueryTool, handleChangelogQuery } from './changelog-query.js';
 import { sourceInspectTool, handleSourceInspect } from './source-inspect.js';
 import { designToCodeTool, handleDesignToCode } from './design-to-code.js';
 
-// 内部保留（不对外注册，供 get_context_bundle 等内部编排复用）
+// 内部保留（不对外注册，供内部编排复用）
+import { fetchDesignDataTool, handleFetchDesignData } from './fetch-design-data.js';
 import { handleComponentList } from './component-list.js';
 import { handleComponentExamples } from './component-examples.js';
 import { handleGetRelatedComponents } from './get-related-components.js';
@@ -55,6 +56,8 @@ export const toolHandlers: Record<
 
 // 重新导出公开工具
 export {
+  fetchDesignDataTool,
+  handleFetchDesignData,
   getContextBundleTool,
   handleGetContextBundle,
   componentSearchTool,

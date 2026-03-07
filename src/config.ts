@@ -74,6 +74,21 @@ export const ENV_PACKAGE_ROOT_LEGACY = 'MY_DESIGN_PACKAGE_ROOT';
 export const ENV_OCTO_DIR = 'OCTO_DIR';
 
 /**
+ * Octo API 基础 URL
+ * 示例：OCTO_API_BASE=https://octo.example.com/api/v1
+ */
+export const ENV_OCTO_API_BASE = 'OCTO_API_BASE';
+
+/**
+ * Octo API 认证 Token
+ * 示例：OCTO_TOKEN=your-token-here
+ */
+export const ENV_OCTO_TOKEN = 'OCTO_TOKEN';
+
+/** fetch_design_data 默认超时时间（ms） */
+export const FETCH_DESIGN_TIMEOUT = 30_000;
+
+/**
  * design_to_code 工具的默认输出格式
  * - 'html':  React 脚手架（CSS + JSX，推荐弱模型）
  * - 'dsl':   精简 JSON（token 少，适合强模型）
