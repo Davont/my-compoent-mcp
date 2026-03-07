@@ -75,7 +75,9 @@ export const ENV_OCTO_DIR = 'OCTO_DIR';
 
 /**
  * design_to_code 工具的默认输出格式
- * - 'html': 语义化 HTML（AI 可直接理解布局，推荐弱模型）
- * - 'dsl':  精简 JSON（token 少，适合强模型）
+ * - 'html':  React 脚手架（CSS + JSX，推荐弱模型）
+ * - 'dsl':   精简 JSON（token 少，适合强模型）
+ * - 'devUI': Vue SFC（含组件库组件代码 + scoped style）
  */
-export const DEFAULT_OUTPUT_MODE: 'html' | 'dsl' = 'html';
+export type OutputMode = 'html' | 'dsl' | 'devUI';
+export const DEFAULT_OUTPUT_MODE: OutputMode = 'html';

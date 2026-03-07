@@ -14,7 +14,9 @@ import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join, resolve, basename, sep } from 'path';
 import { transform, TransformMode } from '../transform/index.js';
+import { transformDevUI } from '../transform/devui.js';
 import { handleGetContextBundle } from './get-context-bundle.js';
+import { formatDevUIOutput } from './format-devui.js';
 import { ENV_OCTO_DIR, DEFAULT_OUTPUT_MODE } from '../config.js';
 
 // 只允许文件名中出现字母、数字、连字符、下划线，防止路径穿越
@@ -153,17 +155,26 @@ export const designToCodeTool: Tool = {
     '【设计稿转代码的唯一入口】当用户提到 .octo、index.json、设计稿、Figma、Octo，或要求"转化/转换/生成 前端页面代码"时，必须首先调用本工具。' +
     '无需先调用 get_context_bundle 或 component_search，本工具已内置组件识别和规范获取。\n\n' +
     '⚠️ 禁止用 read_file 直接读取 .octo/ 下的 JSON 文件（文件极大，会浪费 token）。直接调用本工具即可，工具内部自动读取、解析、转换。\n\n' +
-    '将 .octo/ 目录下的设计稿 JSON 转换为精简 DSL 或 React 脚手架（CSS + JSX），自动推断 flex 布局和 CSS 样式，识别组件库组件并联动返回 Props 规范。\n\n' +
+    '将 .octo/ 目录下的设计稿 JSON 转换为精简 DSL、React 脚手架（CSS + JSX）或 Vue SFC，自动推断 flex 布局和 CSS 样式，识别组件库组件并联动返回 Props 规范。\n\n' +
     '- 不传 file：列出 .octo/ 下所有可用文件名\n' +
     '- 传 file + outputMode：转换指定设计稿，返回结构化数据 + 组件规范（如有匹配）\n\n' +
     '⚠️ 调用本工具后，必须完成以下全部步骤才算任务完成，缺少任何一步都不算完成：\n\n' +
-    '第一步（复制写入）：将返回的 styles.css 和 Page.tsx 逐字原样写入项目文件，禁止修改任何内容。\n\n' +
+    '== html 模式（React）==\n' +
+    '第一步（复制写入）：将返回的 styles.css 和 Page.tsx 逐字原样写入项目文件，禁止修改任何内容。\n' +
     '第二步（语义化改造）：在已写入的文件上修改：\n' +
     '  a. 只改 n- 开头的独立类名（如 n-33-946、n-rel-33-945、n-split-33-xxx）：参考对应元素的 data-name 属性理解其含义，替换为语义化名称（如 task-goal、title-bar）。styles.css 中的选择器同步修改，样式值保持不变\n' +
     '  b. s- 开头的共享类名（如 s-729846、s-02dea1）是多个元素共用的，禁止修改、禁止拆分、禁止重命名\n' +
     '  c. layout-node、flex-row-start、flex-col-center、btn、text、icon、vector 等布局类禁止修改\n' +
     '  d. 删除所有 data-name 属性\n\n' +
-    '只有第一步和第二步全部完成，才能结束任务。不要替换组件库组件，不要添加交互事件，不要修改任何 CSS 样式值。',
+    '== devUI 模式（Vue）==\n' +
+    '第一步（复制写入）：将返回的 Page.vue 逐字原样写入项目文件，禁止修改任何内容。\n' +
+    '第二步（语义化改造）：在已写入的文件上修改：\n' +
+    '  a. 只改 n- 开头的独立类名，<style scoped> 中的选择器同步修改，样式值不变\n' +
+    '  b. s- 开头的共享类名禁止修改\n' +
+    '  c. 布局类禁止修改\n' +
+    '  d. 组件标签及其 props 禁止修改\n' +
+    '  e. 删除所有 data-name 属性\n\n' +
+    '只有第一步和第二步全部完成，才能结束任务。不要添加交互事件，不要修改任何 CSS 样式值。',
   inputSchema: {
     type: 'object',
     properties: {
@@ -175,9 +186,9 @@ export const designToCodeTool: Tool = {
       },
       outputMode: {
         type: 'string',
-        enum: ['dsl', 'html'],
+        enum: ['dsl', 'html', 'devUI'],
         description:
-          `输出格式。html: React 脚手架（CSS 文件 + JSX 组件，可直接复制使用）；dsl: 精简 JSON（token 少）。默认 ${DEFAULT_OUTPUT_MODE}。`,
+          `输出格式。html: React 脚手架（CSS + JSX）；dsl: 精简 JSON（token 少）；devUI: Vue SFC（含组件代码 + scoped style）。默认 ${DEFAULT_OUTPUT_MODE}。`,
       },
     },
   },
@@ -190,7 +201,8 @@ export async function handleDesignToCode(
 ): Promise<CallToolResult> {
   const file = typeof args?.file === 'string' ? args.file.trim() : undefined;
   const rawMode = typeof args?.outputMode === 'string' ? args.outputMode : DEFAULT_OUTPUT_MODE;
-  const outputMode: TransformMode = rawMode === 'dsl' ? 'dsl' : 'html';
+  const isDevUI = rawMode === 'devUI';
+  const outputMode: TransformMode = isDevUI ? 'html' : (rawMode === 'dsl' ? 'dsl' : 'html');
 
   const octoDir = getOctoDir();
 
@@ -285,7 +297,50 @@ export async function handleDesignToCode(
     };
   }
 
-  // 调用 transform 函数
+  // devUI 模式走独立路径
+  if (isDevUI) {
+    let devUIResult;
+    try {
+      devUIResult = transformDevUI(json);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text', text: `transformDevUI 执行失败: ${msg}` }],
+        isError: true,
+      };
+    }
+
+    let componentBundle: string | null = null;
+    const recommended = devUIResult.recommendedComponents;
+    if (recommended.length > 0) {
+      try {
+        const bundleResult = await handleGetContextBundle({
+          components: recommended,
+          depth: 'summary',
+        });
+        if (!bundleResult.isError) {
+          const firstContent = bundleResult.content[0];
+          if (firstContent?.type === 'text') {
+            componentBundle = firstContent.text;
+          }
+        }
+      } catch {
+        // 错误隔离
+      }
+    }
+
+    const output = formatDevUIOutput({
+      fileName: file,
+      vue: devUIResult.vue,
+      componentBundle,
+      recommendedComponents: recommended,
+    });
+    return {
+      content: [{ type: 'text', text: output }],
+    };
+  }
+
+  // dsl / html 模式（原有逻辑不变）
   let result;
   try {
     result = transform(json, outputMode);
@@ -297,7 +352,6 @@ export async function handleDesignToCode(
     };
   }
 
-  // 内置联动：如果 transform 返回了推荐组件，自动获取组件规范
   let componentBundle: string | null = null;
   const recommended = result.recommendedComponents;
   if (recommended && recommended.length > 0) {
