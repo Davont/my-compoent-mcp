@@ -11,13 +11,15 @@
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { existsSync, readdirSync, readFileSync } from 'fs';
-import { join, resolve, basename, sep } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { join, resolve, sep } from 'path';
 import { transform, TransformMode } from '../transform/index.js';
 import { transformDevUI } from '../transform/devui.js';
 import { handleGetContextBundle } from './get-context-bundle.js';
 import { formatDevUIOutput } from './format-devui.js';
 import { ENV_OCTO_DIR, DEFAULT_OUTPUT_MODE } from '../config.js';
+import { getComponentList } from '../utils/doc-reader.js';
+import { OctoFileInfo, listOctoFiles } from '../utils/octo-files.js';
 
 // 只允许文件名中出现字母、数字、连字符、下划线，防止路径穿越
 const SAFE_FILENAME_RE = /^[\w-]+$/;
@@ -32,32 +34,17 @@ function getOctoDir(): string {
   return join(process.cwd(), '.octo');
 }
 
-/**
- * 列出 .octo/ 下所有可读取的 .json 文件（不含扩展名）
- * 只返回满足 SAFE_FILENAME_RE 的文件名，确保"列出的都能读"
- */
-function listOctoFiles(octoDir: string): string[] {
-  const entries = readdirSync(octoDir, { withFileTypes: true });
-  return entries
-    .filter(e => e.isFile() && e.name.endsWith('.json'))
-    .map(e => basename(e.name, '.json'))
-    .filter(name => SAFE_FILENAME_RE.test(name))
-    .sort();
-}
-
-/**
- * 格式化文件列表输出
- */
-function formatFileList(files: string[]): string {
+function formatFileList(files: OctoFileInfo[]): string {
   const lines: string[] = [];
   lines.push('# .octo/ 可用设计稿文件\n');
   lines.push(`共 ${files.length} 个文件：\n`);
   for (const f of files) {
-    lines.push(`- \`${f}\``);
+    const tag = f.ext === '.vue' ? ' [预生成 Vue]' : '';
+    lines.push(`- \`${f.name}\`${tag}`);
   }
   lines.push('');
   lines.push('> 使用 `design_to_code` 并传入 `file` 参数来读取并转换指定设计稿。');
-  lines.push('> 示例：`design_to_code({ file: "' + (files[0] ?? 'home') + '", outputMode: "dsl" })`');
+  lines.push('> 示例：`design_to_code({ file: "' + (files[0]?.name ?? 'home') + '" })`');
   return lines.join('\n');
 }
 
@@ -181,8 +168,8 @@ export const designToCodeTool: Tool = {
       file: {
         type: 'string',
         description:
-          '设计稿文件名（不含 .json 扩展名），如 "index"、"home"、"detail"。' +
-          '省略时列出 .octo/ 下所有可用文件。通常使用 "index"。',
+          '设计稿文件名（不含扩展名），如 "index"、"home"、"detail"。' +
+          '自动检测 .vue（预生成）或 .json（需转换）。省略时列出 .octo/ 下所有可用文件。',
       },
       outputMode: {
         type: 'string',
@@ -226,7 +213,7 @@ export async function handleDesignToCode(
         return {
           content: [{
             type: 'text',
-            text: `.octo/ 目录为空，未找到任何 .json 文件。\n请将设计稿 JSON 文件放入 ${octoDir}/ 目录。`,
+            text: `.octo/ 目录为空，未找到任何设计稿文件。\n请使用 fetch_design_data 下载设计稿，或将文件放入 ${octoDir}/ 目录。`,
           }],
           isError: true,
         };
@@ -254,40 +241,108 @@ export async function handleDesignToCode(
     };
   }
 
-  // 路径安全校验：确保解析后的路径在 .octo/ 目录内（用 path.sep 兼容 Windows）
-  const targetPath = resolve(octoDir, `${file}.json`);
+  // 路径安全校验
   const resolvedOctoDir = resolve(octoDir);
-  if (!targetPath.startsWith(resolvedOctoDir + sep) && targetPath !== resolvedOctoDir) {
+  const jsonPath = resolve(octoDir, `${file}.json`);
+  const vuePath = resolve(octoDir, `${file}.vue`);
+
+  if (!jsonPath.startsWith(resolvedOctoDir + sep) && jsonPath !== resolvedOctoDir) {
     return {
       content: [{ type: 'text', text: `路径安全检查失败: ${file}` }],
       isError: true,
     };
   }
 
-  // 文件不存在：列出可用文件
-  if (!existsSync(targetPath)) {
+  // 优先检测 .vue（预生成代码），其次 .json（需 core.js 转换）
+  const hasVue = existsSync(vuePath);
+  const hasJson = existsSync(jsonPath);
+
+  if (!hasVue && !hasJson) {
     try {
       const available = listOctoFiles(octoDir);
-      const availableStr = available.length > 0 ? available.map(f => `"${f}"`).join(', ') : '（无）';
+      const availableStr = available.length > 0
+        ? available.map(f => `"${f.name}"${f.ext === '.vue' ? ' [Vue]' : ''}`).join(', ')
+        : '（无）';
       return {
         content: [{
           type: 'text',
-          text: `未找到设计稿文件 "${file}.json"（查找路径：${octoDir}）。\n可用文件：${availableStr}`,
+          text: `未找到设计稿文件 "${file}"（查找路径：${octoDir}）。\n可用文件：${availableStr}`,
         }],
         isError: true,
       };
     } catch {
       return {
-        content: [{ type: 'text', text: `未找到设计稿文件 "${file}.json"。` }],
+        content: [{ type: 'text', text: `未找到设计稿文件 "${file}"。` }],
         isError: true,
       };
     }
   }
 
-  // 读取并解析 JSON
+  // ============ 预生成 Vue 文件：devUI 模式直接返回，跳过 core.js ============
+  if (hasVue && isDevUI) {
+    let vueContent: string;
+    try {
+      vueContent = readFileSync(vuePath, 'utf-8');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text', text: `读取 ${file}.vue 失败: ${msg}` }],
+        isError: true,
+      };
+    }
+
+    const recommendedComponents = extractComponentsFromVue(vueContent);
+
+    let componentBundle: string | null = null;
+    if (recommendedComponents.length > 0) {
+      try {
+        const bundleResult = await handleGetContextBundle({
+          components: recommendedComponents,
+          depth: 'summary',
+        });
+        if (!bundleResult.isError) {
+          const firstContent = bundleResult.content[0];
+          if (firstContent?.type === 'text') {
+            componentBundle = firstContent.text;
+          }
+        }
+      } catch {
+        // 错误隔离
+      }
+    }
+
+    const output = formatDevUIOutput({
+      fileName: file,
+      vue: vueContent,
+      componentBundle,
+      recommendedComponents,
+      sourceExt: '.vue',
+    });
+    return {
+      content: [{ type: 'text', text: output }],
+    };
+  }
+
+  // 用户请求 dsl/html 但只有 .vue（无 .json 可转换）
+  if (!hasJson) {
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `文件 "${file}" 只有预生成的 .vue 版本，不支持 ${rawMode} 输出模式。\n` +
+          `可选方案：\n` +
+          `- 使用 devUI 模式：\`design_to_code({ file: "${file}", outputMode: "devUI" })\`\n` +
+          `- 用 fetch_design_data 的 fileKey 模式下载原始 JSON 后重试`,
+      }],
+      isError: true,
+    };
+  }
+
+  // ============ JSON 文件：走 core.js 转换管线 ============
+
   let json: unknown;
   try {
-    const raw = readFileSync(targetPath, 'utf-8');
+    const raw = readFileSync(jsonPath, 'utf-8');
     json = JSON.parse(raw);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -297,7 +352,6 @@ export async function handleDesignToCode(
     };
   }
 
-  // devUI 模式走独立路径
   if (isDevUI) {
     let devUIResult;
     try {
@@ -334,6 +388,7 @@ export async function handleDesignToCode(
       vue: devUIResult.vue,
       componentBundle,
       recommendedComponents: recommended,
+      sourceExt: '.json',
     });
     return {
       content: [{ type: 'text', text: output }],
@@ -383,4 +438,47 @@ export async function handleDesignToCode(
   return {
     content: [{ type: 'text', text: output }],
   };
+}
+
+// ============ 预生成 Vue 文件的组件识别 ============
+
+/**
+ * 从 Vue SFC 代码中扫描 import 语句和模板标签，
+ * 与 doc/index.json 中已注册的组件做匹配，返回命中的组件名列表。
+ */
+function extractComponentsFromVue(vueContent: string): string[] {
+  let knownComponents: Array<{ name: string; aliases?: string[]; keywords?: string[] }>;
+  try {
+    knownComponents = getComponentList();
+  } catch {
+    return [];
+  }
+  if (knownComponents.length === 0) return [];
+
+  const tokens = new Set<string>();
+
+  const importRe = /import\s+\{([^}]+)\}\s+from\s+['"][^'"]+['"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = importRe.exec(vueContent)) !== null) {
+    for (const part of m[1].split(',')) {
+      const trimmed = part.trim();
+      if (trimmed) tokens.add(trimmed.toLowerCase());
+    }
+  }
+
+  const tagRe = /<([A-Z][\w-]*)/g;
+  while ((m = tagRe.exec(vueContent)) !== null) {
+    tokens.add(m[1].toLowerCase());
+  }
+
+  if (tokens.size === 0) return [];
+
+  const matched = new Set<string>();
+  for (const comp of knownComponents) {
+    const nameLower = comp.name.toLowerCase();
+    if (tokens.has(nameLower)) { matched.add(comp.name); continue; }
+    if (comp.aliases?.some(a => tokens.has(a.toLowerCase()))) { matched.add(comp.name); continue; }
+  }
+
+  return Array.from(matched);
 }

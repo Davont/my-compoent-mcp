@@ -13,14 +13,15 @@ export interface FormatDevUIOptions {
   vue: string;
   componentBundle?: string | null;
   recommendedComponents: string[];
+  sourceExt?: '.json' | '.vue';
 }
 
 export function formatDevUIOutput(opts: FormatDevUIOptions): string {
-  const { fileName, vue, componentBundle, recommendedComponents } = opts;
+  const { fileName, vue, componentBundle, recommendedComponents, sourceExt = '.json' } = opts;
   const lines: string[] = [];
 
   lines.push('# 设计稿数据已就绪（DevUI Vue 模式）\n');
-  lines.push(`文件：${fileName}.json`);
+  lines.push(`文件：${fileName}${sourceExt}`);
   lines.push('输出格式：devUI\n');
 
   lines.push('## Page.vue\n');

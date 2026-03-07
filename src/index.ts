@@ -26,6 +26,8 @@ export {
   handleSourceInspect,
   designToCodeTool,
   handleDesignToCode,
+  fetchDesignDataTool,
+  handleFetchDesignData,
   // 内部工具 handler
   handleComponentList,
   handleComponentExamples,

@@ -59,11 +59,13 @@
   },
   "dependencies": {
     "@babel/parser": "^7.29.0",
-    "@modelcontextprotocol/sdk": "^1.25.1"
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "adm-zip": "^0.5.16"
   },
   "devDependencies": {
     "@claude-flow/cli": "^3.0.2",
     "@rslib/core": "^0.18.5",
+    "@types/adm-zip": "^0.5.7",
     "@rstest/core": "^0.0.5",
     "@types/node": "^24.10.4",
     "typescript": "^5.9.3"

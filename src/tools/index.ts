@@ -1,7 +1,7 @@
 /**
  * 工具注册
  *
- * 对外公开 7 个工具。旧工具 handler 保留可内部复用，但不注册到 MCP。
+ * 对外公开 8 个工具。旧工具 handler 保留可内部复用，但不注册到 MCP。
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
@@ -14,9 +14,9 @@ import { themeTokensTool, handleThemeTokens } from './theme-tokens.js';
 import { changelogQueryTool, handleChangelogQuery } from './changelog-query.js';
 import { sourceInspectTool, handleSourceInspect } from './source-inspect.js';
 import { designToCodeTool, handleDesignToCode } from './design-to-code.js';
+import { fetchDesignDataTool, handleFetchDesignData } from './fetch-design-data.js';
 
 // 内部保留（不对外注册，供内部编排复用）
-import { fetchDesignDataTool, handleFetchDesignData } from './fetch-design-data.js';
 import { handleComponentList } from './component-list.js';
 import { handleComponentExamples } from './component-examples.js';
 import { handleGetRelatedComponents } from './get-related-components.js';
@@ -30,6 +30,7 @@ import { handleGetFunctionCode } from './get-function-code.js';
  */
 export const tools: Tool[] = [
   designToCodeTool,
+  fetchDesignDataTool,
   getContextBundleTool,
   componentSearchTool,
   componentDetailsTool,
@@ -51,6 +52,7 @@ export const toolHandlers: Record<
   [themeTokensTool.name]: handleThemeTokens,
   [changelogQueryTool.name]: handleChangelogQuery,
   [sourceInspectTool.name]: handleSourceInspect,
+  [fetchDesignDataTool.name]: handleFetchDesignData,
   [designToCodeTool.name]: handleDesignToCode,
 };
 
