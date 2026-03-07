@@ -1,12 +1,13 @@
 /**
  * 工具注册
  *
- * 对外公开 7 个工具。旧工具 handler 保留可内部复用，但不注册到 MCP。
+ * 对外公开 8 个工具。旧工具 handler 保留可内部复用，但不注册到 MCP。
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 // 公开工具
+import { fetchDesignDataTool, handleFetchDesignData } from './fetch-design-data.js';
 import { getContextBundleTool, handleGetContextBundle } from './get-context-bundle.js';
 import { componentSearchTool, handleComponentSearch } from './component-search.js';
 import { componentDetailsTool, handleComponentDetails } from './component-details.js';
@@ -28,6 +29,7 @@ import { handleGetFunctionCode } from './get-function-code.js';
  * 对外公开的工具列表（ListTools 返回此数组）
  */
 export const tools: Tool[] = [
+  fetchDesignDataTool,
   designToCodeTool,
   getContextBundleTool,
   componentSearchTool,
@@ -44,6 +46,7 @@ export const toolHandlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<CallToolResult>
 > = {
+  [fetchDesignDataTool.name]: handleFetchDesignData,
   [getContextBundleTool.name]: handleGetContextBundle,
   [componentSearchTool.name]: handleComponentSearch,
   [componentDetailsTool.name]: handleComponentDetails,
@@ -55,6 +58,8 @@ export const toolHandlers: Record<
 
 // 重新导出公开工具
 export {
+  fetchDesignDataTool,
+  handleFetchDesignData,
   getContextBundleTool,
   handleGetContextBundle,
   componentSearchTool,
