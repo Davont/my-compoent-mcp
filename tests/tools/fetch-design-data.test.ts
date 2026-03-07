@@ -80,7 +80,7 @@ describe('fetch_design_data 环境变量检查', () => {
   it('缺少 OCTO_API_BASE 时返回错误提示', async () => {
     delete process.env.OCTO_API_BASE;
     delete process.env.OCTO_TOKEN;
-    const result = await handleFetchDesignData({ fileKey: 'test123' });
+    const result = await handleFetchDesignData({ input: 'test123' });
     expect(result.isError).toBe(true);
     const text = getText(result);
     expect(text).toContain('OCTO_API_BASE');
@@ -89,7 +89,7 @@ describe('fetch_design_data 环境变量检查', () => {
   it('有 OCTO_API_BASE 但缺少 OCTO_TOKEN 时返回错误提示', async () => {
     process.env.OCTO_API_BASE = 'http://localhost:9999';
     delete process.env.OCTO_TOKEN;
-    const result = await handleFetchDesignData({ fileKey: 'test123' });
+    const result = await handleFetchDesignData({ input: 'test123' });
     expect(result.isError).toBe(true);
     const text = getText(result);
     expect(text).toContain('OCTO_TOKEN');
@@ -109,14 +109,14 @@ describe('fetch_design_data 文件名校验', () => {
   afterEach(() => restoreEnv());
 
   it('saveName 含非法字符时返回错误', async () => {
-    const result = await handleFetchDesignData({ fileKey: 'test', saveName: '../etc/passwd' });
+    const result = await handleFetchDesignData({ input: 'test', saveName: '../etc/passwd' });
     expect(result.isError).toBe(true);
     const text = getText(result);
     expect(text).toContain('非法字符');
   });
 
   it('saveName 含斜杠时返回错误', async () => {
-    const result = await handleFetchDesignData({ fileKey: 'test', saveName: 'a/b' });
+    const result = await handleFetchDesignData({ input: 'test', saveName: 'a/b' });
     expect(result.isError).toBe(true);
   });
 });
@@ -147,7 +147,7 @@ describe('fetch_design_data overwrite 控制', () => {
 
   it('overwrite=false 且文件已存在时不覆盖，返回提示', async () => {
     const result = await handleFetchDesignData({
-      fileKey: 'test',
+      input: 'test',
       saveName: 'existing',
       overwrite: false,
     });
@@ -247,7 +247,7 @@ describe('fetch_design_data API 下载', () => {
   });
 
   it('正常下载设计稿并保存到本地', async () => {
-    const result = await handleFetchDesignData({ fileKey: 'design-ok' });
+    const result = await handleFetchDesignData({ input: 'design-ok' });
     expect(result.isError).toBeUndefined();
     const text = getText(result);
     expect(text).toContain('下载完成');
@@ -262,7 +262,7 @@ describe('fetch_design_data API 下载', () => {
   });
 
   it('自定义 saveName 生效', async () => {
-    const result = await handleFetchDesignData({ fileKey: 'design-ok', saveName: 'my-page' });
+    const result = await handleFetchDesignData({ input: 'design-ok', saveName: 'my-page' });
     expect(result.isError).toBeUndefined();
     const text = getText(result);
     expect(text).toContain('my-page.json');
@@ -271,7 +271,7 @@ describe('fetch_design_data API 下载', () => {
 
   it('带 nodeId 参数下载指定子树', async () => {
     const result = await handleFetchDesignData({
-      fileKey: 'design-with-node',
+      input: 'design-with-node',
       nodeId: '1:2',
       saveName: 'node-test',
     });
@@ -287,28 +287,28 @@ describe('fetch_design_data API 下载', () => {
 
   it('API 返回 401 时报认证错误', async () => {
     process.env.OCTO_TOKEN = 'bad-token';
-    const result = await handleFetchDesignData({ fileKey: 'design-ok' });
+    const result = await handleFetchDesignData({ input: 'design-ok' });
     expect(result.isError).toBe(true);
     const text = getText(result);
     expect(text).toContain('401');
   });
 
   it('API 返回 500 时报服务器错误', async () => {
-    const result = await handleFetchDesignData({ fileKey: 'design-500' });
+    const result = await handleFetchDesignData({ input: 'design-500' });
     expect(result.isError).toBe(true);
     const text = getText(result);
     expect(text).toContain('500');
   });
 
   it('API 返回 404 时报未找到', async () => {
-    const result = await handleFetchDesignData({ fileKey: 'nonexistent' });
+    const result = await handleFetchDesignData({ input: 'nonexistent' });
     expect(result.isError).toBe(true);
     const text = getText(result);
     expect(text).toContain('404');
   });
 
   it('API 返回无效 JSON 时报解析错误', async () => {
-    const result = await handleFetchDesignData({ fileKey: 'design-bad-json' });
+    const result = await handleFetchDesignData({ input: 'design-bad-json' });
     expect(result.isError).toBe(true);
     const text = getText(result);
     expect(text).toContain('请求失败');
@@ -316,7 +316,7 @@ describe('fetch_design_data API 下载', () => {
 
   it('超时场景返回超时错误', async () => {
     const result = await handleFetchDesignData({
-      fileKey: 'design-slow',
+      input: 'design-slow',
       timeout: 200,
     });
     expect(result.isError).toBe(true);
@@ -325,13 +325,13 @@ describe('fetch_design_data API 下载', () => {
   });
 
   it('fileKey 含特殊字符时自动转换为合法文件名', async () => {
-    const result = await handleFetchDesignData({ fileKey: 'design-ok' });
+    const result = await handleFetchDesignData({ input: 'design-ok' });
     expect(result.isError).toBeUndefined();
     expect(existsSync(join(OCTO_DIR, 'design-ok.json'))).toBe(true);
   });
 
   it('返回的节点数统计正确', async () => {
-    const result = await handleFetchDesignData({ fileKey: 'design-ok' });
+    const result = await handleFetchDesignData({ input: 'design-ok' });
     const text = getText(result);
     // MOCK_DESIGN: root(1) + TEXT(1) + FRAME(1) = 3
     expect(text).toContain('3');
@@ -341,7 +341,7 @@ describe('fetch_design_data API 下载', () => {
     const freshDir = join(process.cwd(), '.octo_test_fresh');
     process.env.OCTO_DIR = freshDir;
     try {
-      const result = await handleFetchDesignData({ fileKey: 'design-ok', saveName: 'fresh-test' });
+      const result = await handleFetchDesignData({ input: 'design-ok', saveName: 'fresh-test' });
       expect(result.isError).toBeUndefined();
       expect(existsSync(join(freshDir, 'fresh-test.json'))).toBe(true);
     } finally {

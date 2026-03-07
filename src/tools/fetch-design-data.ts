@@ -51,7 +51,7 @@ function formatLocalFileList(octoDir: string, files: OctoFileInfo[]): string {
   const lines: string[] = [];
   lines.push('# .octo/ 本地设计稿文件\n');
   if (files.length === 0) {
-    lines.push('当前无本地文件。使用 `fetch_design_data` 传入 `fileKey` 或 `shareCode` 下载。');
+    lines.push('当前无本地文件。使用 `fetch_design_data({ input: "..." })` 传入分享口令或 fileKey 下载。');
     return lines.join('\n');
   }
   lines.push(`共 ${files.length} 个文件：\n`);
@@ -131,25 +131,20 @@ export const fetchDesignDataTool: Tool = {
   name: 'fetch_design_data',
   description:
     '从 Octo 平台下载设计稿到本地 .octo/ 目录，供 design_to_code 工具使用。\n\n' +
-    '支持两种下载方式（二选一）：\n' +
-    '- shareCode 模式（推荐）：传入分享口令（如 "##53085E4C##"），直接下载服务端预生成的 Vue 代码，无需配置 Token\n' +
-    '- fileKey 模式：传入设计稿 ID，下载原始 Figma JSON（需配置 OCTO_API_BASE 和 OCTO_TOKEN 环境变量）\n\n' +
+    '传入 input 参数即可，工具自动识别类型：\n' +
+    '- 包含 ## 的字符串（如 "##53085E4C##"）→ 分享口令模式，下载预生成 Vue 代码，无需配置 Token\n' +
+    '- 其他字符串（如 "abc123"）→ fileKey 模式，下载原始 Figma JSON（需配置 OCTO_API_BASE 和 OCTO_TOKEN）\n\n' +
     '使用流程：\n' +
-    '1. 调用本工具下载设计稿\n' +
+    '1. 调用本工具下载设计稿：`fetch_design_data({ input: "##53085E4C##" })`\n' +
     '2. 调用 `design_to_code({ file: "xxx" })` 转换为代码\n\n' +
-    '不传 fileKey 和 shareCode 时列出本地已有文件。',
+    '不传 input 时列出本地已有文件。',
   inputSchema: {
     type: 'object',
     properties: {
-      shareCode: {
+      input: {
         type: 'string',
         description:
-          'Octo 分享口令（如 "##53085E4C##"），与 fileKey 二选一。无需配置环境变量，直接下载服务端预生成的 Vue 代码。',
-      },
-      fileKey: {
-        type: 'string',
-        description:
-          'Octo 设计稿 ID，与 shareCode 二选一。需要配置 OCTO_API_BASE 和 OCTO_TOKEN 环境变量。',
+          '设计稿标识，自动识别类型：包含 ## 视为分享口令（如 "##53085E4C##"），否则视为 fileKey。不传则列出本地已有文件。',
       },
       nodeId: {
         type: 'string',
@@ -159,7 +154,7 @@ export const fetchDesignDataTool: Tool = {
       saveName: {
         type: 'string',
         description:
-          '保存的文件名（不含扩展名）。默认使用 fileKey 或口令 ID。只允许字母、数字、连字符、下划线。',
+          '保存的文件名（不含扩展名）。默认自动从 input 推导。只允许字母、数字、连字符、下划线。',
       },
       timeout: {
         type: 'number',
@@ -178,8 +173,7 @@ export const fetchDesignDataTool: Tool = {
 export async function handleFetchDesignData(
   args: Record<string, unknown>
 ): Promise<CallToolResult> {
-  const shareCode = typeof args?.shareCode === 'string' ? args.shareCode.trim() : undefined;
-  const fileKey = typeof args?.fileKey === 'string' ? args.fileKey.trim() : undefined;
+  const rawInput = typeof args?.input === 'string' ? args.input.trim() : undefined;
   const nodeId = typeof args?.nodeId === 'string' ? args.nodeId.trim() : undefined;
   const rawSaveName = typeof args?.saveName === 'string' ? args.saveName.trim() : undefined;
   const timeout = typeof args?.timeout === 'number' && args.timeout > 0
@@ -189,36 +183,21 @@ export async function handleFetchDesignData(
 
   const octoDir = getOctoDir();
 
-  if (shareCode && fileKey) {
-    return {
-      content: [{
-        type: 'text',
-        text: 'shareCode 和 fileKey 不能同时传入，请选择其中一种下载方式。',
-      }],
-      isError: true,
-    };
-  }
-
-  // 未传任何标识：列出本地文件
-  if (!fileKey && !shareCode) {
+  // 未传 input：列出本地文件
+  if (!rawInput) {
     const files = listOctoFiles(octoDir);
     return {
       content: [{ type: 'text', text: formatLocalFileList(octoDir, files) }],
     };
   }
 
+  // 自动识别：包含 ## → 分享口令模式，否则 → fileKey 模式
+  const shareCodeId = decodeSharePassword(rawInput);
+  const isShareMode = shareCodeId !== undefined;
+
   // ============ shareCode 模式 ============
-  if (shareCode) {
-    const code = decodeSharePassword(shareCode);
-    if (!code) {
-      return {
-        content: [{
-          type: 'text',
-          text: `无法从 "${shareCode}" 中提取设计稿 ID。请确保格式为 ##ID##（如 "##53085E4C##"）。`,
-        }],
-        isError: true,
-      };
-    }
+  if (isShareMode) {
+    const code = shareCodeId;
 
     const saveName = rawSaveName || code.replace(/[^\w-]/g, '_');
     if (!SAFE_FILENAME_RE.test(saveName)) {
@@ -299,13 +278,7 @@ export async function handleFetchDesignData(
 
   // ============ fileKey 模式（原有逻辑） ============
 
-  // 此处 fileKey 必有值（shareCode 和空参数分支已返回）
-  if (!fileKey) {
-    return {
-      content: [{ type: 'text', text: '参数错误：缺少 fileKey 或 shareCode。' }],
-      isError: true,
-    };
-  }
+  const fileKey = rawInput;
 
   // 检查环境变量
   const apiBase = process.env[ENV_OCTO_API_BASE];
