@@ -81,8 +81,9 @@ function checkPathSafety(octoDir: string, fileName: string): string | null {
 
 interface FetchResult {
   saveName: string;
-  ext: '.json' | '.vue';
+  ext: string;
   sourceDesc: string;
+  savedFiles: string[];
 }
 
 function pickConvertibleFile(files: string[]): string | undefined {
@@ -144,6 +145,7 @@ async function fetchByShareCode(
     saveName: derivedName || saveName,
     ext,
     sourceDesc: `分享口令 ${code}（原始压缩包: ${zipName}）`,
+    savedFiles,
   };
 }
 
@@ -203,7 +205,7 @@ async function fetchByFileKey(
     ensureOctoDir(octoDir);
     writeFileSync(targetPath, JSON.stringify(json), 'utf-8');
 
-    return { saveName, ext: '.json', sourceDesc: `fileKey ${fileKey}${nodeId ? ` (node: ${nodeId})` : ''}` };
+    return { saveName, ext: '.json', sourceDesc: `fileKey ${fileKey}${nodeId ? ` (node: ${nodeId})` : ''}`, savedFiles: [`${saveName}.json`] };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       return { content: [{ type: 'text', text: `请求超时（${timeout}ms）。尝试增大 timeout 或使用 nodeId 缩小范围。` }], isError: true };
@@ -601,22 +603,21 @@ export async function handleGetDesignData(
     return fetchResult;
   }
 
-  // 步骤 2：转换
-  // shareCode 下载的是 .vue，不需要 core.js 转换
-  if (fetchResult.ext === '.vue') {
+  // shareCode 下载的是预生成文件，不需要转换，直接返回下载结果
+  if (isShareMode) {
+    const lines: string[] = [];
+    lines.push('# 设计稿下载完成（分享口令模式）\n');
+    lines.push(`| 项目 | 值 |`);
+    lines.push(`|------|------|`);
+    lines.push(`| 来源 | ${fetchResult.sourceDesc} |`);
+    lines.push(`| 文件数 | ${fetchResult.savedFiles.length} |`);
+    lines.push('');
+    lines.push('保存到 .octo/ 的文件：');
+    for (const f of fetchResult.savedFiles) {
+      lines.push(`- \`${f}\``);
+    }
     return {
-      content: [{
-        type: 'text',
-        text: formatResult({
-          saveName: fetchResult.saveName,
-          sourceDesc: fetchResult.sourceDesc,
-          transformOutput: {
-            ok: true,
-            outputMode: 'vue',
-            files: [{ name: `${fetchResult.saveName}.vue`, size: formatBytes(statSync(resolve(octoDir, `${fetchResult.saveName}.vue`)).size) }],
-          },
-        }),
-      }],
+      content: [{ type: 'text', text: lines.join('\n') }],
     };
   }
 
