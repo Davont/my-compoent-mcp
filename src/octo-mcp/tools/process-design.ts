@@ -81,7 +81,7 @@ function checkPathSafety(octoDir: string, fileName: string): string | null {
 
 interface FetchResult {
   saveName: string;
-  ext: '.json' | '.vue';
+  ext: string;
   sourceDesc: string;
 }
 
@@ -92,29 +92,34 @@ async function fetchByShareCode(
   timeout: number,
   overwrite: boolean,
 ): Promise<CallToolResult | FetchResult> {
-  const targetPath = resolve(octoDir, `${saveName}.vue`);
-
-  if (!overwrite && existsSync(targetPath)) {
-    return {
-      content: [{ type: 'text', text: `文件 "${saveName}.vue" 已存在，跳过下载。设置 overwrite: true 可覆盖。` }],
-    };
-  }
-
-  let vueContent: string;
-  let fileName: string;
+  let result;
   try {
-    const result = await downloadTransferZip(code, { timeout });
-    vueContent = result.vueContent;
-    fileName = result.fileName;
+    result = await downloadTransferZip(code, { timeout });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return { content: [{ type: 'text', text: `分享口令下载失败: ${msg}` }], isError: true };
   }
 
-  ensureOctoDir(octoDir);
-  writeFileSync(targetPath, vueContent, 'utf-8');
+  const codeFile = result.files[0];
+  if (!codeFile) {
+    return { content: [{ type: 'text', text: '解压成功但未找到任何文件' }], isError: true };
+  }
 
-  return { saveName, ext: '.vue', sourceDesc: `分享口令 ${code}（原始文件: ${fileName}）` };
+  const ext = codeFile.name.includes('.')
+    ? codeFile.name.slice(codeFile.name.lastIndexOf('.'))
+    : '';
+  const targetPath = resolve(octoDir, `${saveName}${ext}`);
+
+  if (!overwrite && existsSync(targetPath)) {
+    return {
+      content: [{ type: 'text', text: `文件 "${saveName}${ext}" 已存在，跳过下载。设置 overwrite: true 可覆盖。` }],
+    };
+  }
+
+  ensureOctoDir(octoDir);
+  writeFileSync(targetPath, codeFile.content, 'utf-8');
+
+  return { saveName, ext, sourceDesc: `分享口令 ${code}（原始文件: ${result.zipName}）` };
 }
 
 async function fetchByFileKey(

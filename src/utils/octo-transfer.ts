@@ -31,9 +31,14 @@ interface TransferApiResponse {
   fileList?: Array<{ path?: string; name?: string }>;
 }
 
+export interface TransferFile {
+  name: string;
+  content: string;
+}
+
 export interface TransferDownloadResult {
-  vueContent: string;
-  fileName: string;
+  files: TransferFile[];
+  zipName: string;
 }
 
 export interface TransferOptions {
@@ -99,19 +104,14 @@ export async function downloadTransferZip(
   const zip = new AdmZip(zipPath);
   zip.extractAllTo(extractDir, true);
 
-  const vuePath = join(extractDir, 'index-px.vue');
-  let vueContent: string;
-  try {
-    vueContent = await fsp.readFile(vuePath, 'utf-8');
-  } catch {
-    throw new Error(
-      `解压成功但未找到 index-px.vue（解压目录: ${extractDir}）`,
-    );
+  const files = await readExtractedFiles(extractDir);
+  if (files.length === 0) {
+    throw new Error(`解压成功但目录为空（解压目录: ${extractDir}）`);
   }
 
   cleanupAsync(workDir);
 
-  return { vueContent, fileName: firstFile.name };
+  return { files, zipName: firstFile.name };
 }
 
 // ======================== Internal helpers ========================
@@ -119,7 +119,7 @@ export async function downloadTransferZip(
 function httpsGetJson<T>(url: string, timeout: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = https
-      .get(url, (res) => {
+      .get(url, { rejectUnauthorized: false }, (res) => {
         let data = '';
         res.on('data', (chunk: string) => (data += chunk));
         res.on('end', () => {
@@ -140,7 +140,7 @@ function httpsGetJson<T>(url: string, timeout: number): Promise<T> {
 function httpsGetBuffer(url: string, timeout: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const req = https
-      .get(url, (res) => {
+      .get(url, { rejectUnauthorized: false }, (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
         res.on('end', () => resolve(Buffer.concat(chunks)));
@@ -158,6 +158,22 @@ function safeJsonParse<T>(str: string): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+async function readExtractedFiles(dir: string, base = ''): Promise<TransferFile[]> {
+  const entries = await fsp.readdir(dir, { withFileTypes: true });
+  const results: TransferFile[] = [];
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    const relName = base ? `${base}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      results.push(...await readExtractedFiles(fullPath, relName));
+    } else if (entry.isFile()) {
+      const content = await fsp.readFile(fullPath, 'utf-8');
+      results.push({ name: entry.name, content });
+    }
+  }
+  return results;
 }
 
 /** 后台删除临时目录，不阻塞返回 */

@@ -210,33 +210,9 @@ export async function handleFetchDesignData(
       };
     }
 
-    const targetPath = resolve(octoDir, `${saveName}.vue`);
-    const resolvedOctoDir = resolve(octoDir);
-    if (!targetPath.startsWith(resolvedOctoDir + sep) && targetPath !== resolvedOctoDir) {
-      return {
-        content: [{ type: 'text', text: `路径安全检查失败: ${saveName}` }],
-        isError: true,
-      };
-    }
-
-    if (!overwrite && existsSync(targetPath)) {
-      return {
-        content: [{
-          type: 'text',
-          text:
-            `文件 "${saveName}.vue" 已存在。传入 overwrite: true 可覆盖，` +
-            `或使用不同的 saveName。\n\n` +
-            `直接使用已有文件：\`design_to_code({ file: "${saveName}" })\``,
-        }],
-      };
-    }
-
-    let vueContent: string;
-    let fileName: string;
+    let result;
     try {
-      const result = await downloadTransferZip(code, { timeout });
-      vueContent = result.vueContent;
-      fileName = result.fileName;
+      result = await downloadTransferZip(code, { timeout });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       return {
@@ -249,27 +225,55 @@ export async function handleFetchDesignData(
       mkdirSync(octoDir, { recursive: true });
     }
 
-    try {
-      writeFileSync(targetPath, vueContent, 'utf-8');
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      return {
-        content: [{ type: 'text', text: `写入文件失败: ${msg}` }],
-        isError: true,
-      };
+    const resolvedOctoDir = resolve(octoDir);
+    const savedFiles: string[] = [];
+
+    for (const file of result.files) {
+      const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+      const baseName = file.name.includes('.')
+        ? file.name.slice(0, file.name.lastIndexOf('.'))
+        : file.name;
+      const targetName = saveName ? `${saveName}${ext}` : `${baseName}${ext}`;
+      const targetPath = resolve(octoDir, targetName);
+
+      if (!targetPath.startsWith(resolvedOctoDir + sep)) {
+        continue;
+      }
+
+      if (!overwrite && existsSync(targetPath)) {
+        savedFiles.push(`${targetName}（已存在，跳过）`);
+        continue;
+      }
+
+      try {
+        writeFileSync(targetPath, file.content, 'utf-8');
+        savedFiles.push(targetName);
+      } catch {
+        savedFiles.push(`${targetName}（写入失败）`);
+      }
     }
 
-    const fileSize = formatBytes(Buffer.byteLength(vueContent, 'utf-8'));
     const lines: string[] = [];
     lines.push('# 设计稿下载完成（分享口令模式）\n');
     lines.push(`| 项目 | 值 |`);
     lines.push(`|------|------|`);
-    lines.push(`| 文件 | \`${saveName}.vue\` |`);
-    lines.push(`| 大小 | ${fileSize} |`);
     lines.push(`| 来源 | 分享口令 ${code} |`);
-    lines.push(`| 原始文件 | ${fileName} |`);
+    lines.push(`| 原始压缩包 | ${result.zipName} |`);
+    lines.push(`| 文件数 | ${savedFiles.length} |`);
     lines.push('');
-    lines.push(`> 下一步：调用 \`design_to_code({ file: "${saveName}" })\` 转换为代码。`);
+    lines.push('保存的文件：');
+    for (const f of savedFiles) {
+      lines.push(`- \`${f}\``);
+    }
+
+    const primaryFile = savedFiles.find(f => !f.includes('（'));
+    if (primaryFile) {
+      const baseName = primaryFile.includes('.')
+        ? primaryFile.slice(0, primaryFile.lastIndexOf('.'))
+        : primaryFile;
+      lines.push('');
+      lines.push(`> 下一步：调用 \`design_to_code({ file: "${baseName}" })\` 转换为代码。`);
+    }
 
     return {
       content: [{ type: 'text', text: lines.join('\n') }],
