@@ -616,6 +616,8 @@ export async function handleGetDesignData(
     for (const f of fetchResult.savedFiles) {
       lines.push(`- \`${f}\``);
     }
+    lines.push('');
+    lines.push('> 任务完成。文件已就绪，无需进一步操作。');
     return {
       content: [{ type: 'text', text: lines.join('\n') }],
     };
