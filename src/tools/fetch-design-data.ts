@@ -130,13 +130,10 @@ async function fetchFromOcto(opts: OctoFetchOptions): Promise<OctoFetchResult> {
 export const fetchDesignDataTool: Tool = {
   name: 'fetch_design_data',
   description:
-    '从 Octo 平台下载设计稿到本地 .octo/ 目录，供 design_to_code 工具使用。\n\n' +
-    '传入 input 参数即可，工具自动识别类型：\n' +
-    '- 包含 ## 的字符串（如 "##53085E4C##"）→ 分享口令模式，下载预生成 Vue 代码，无需配置 Token\n' +
-    '- 其他字符串（如 "abc123"）→ fileKey 模式，下载原始 Figma JSON（需配置 OCTO_API_BASE 和 OCTO_TOKEN）\n\n' +
-    '使用流程：\n' +
-    '1. 调用本工具下载设计稿：`fetch_design_data({ input: "##53085E4C##" })`\n' +
-    '2. 调用 `design_to_code({ file: "xxx" })` 转换为代码\n\n' +
+    '从 Octo 平台下载设计稿到本地 .octo/ 目录。只负责下载，不做转换。\n\n' +
+    '传入 input 参数，工具自动识别类型：\n' +
+    '- 包含 ## 的字符串（如 "##53085E4C##"）→ 分享口令模式，直接下载预生成的代码文件，无需 Token\n' +
+    '- 其他字符串（如 "abc123"）→ fileKey 模式，下载原始设计稿 JSON，需配置 OCTO_API_BASE 和 OCTO_TOKEN\n\n' +
     '不传 input 时列出本地已有文件。',
   inputSchema: {
     type: 'object',
