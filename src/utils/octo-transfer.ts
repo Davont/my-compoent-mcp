@@ -11,6 +11,7 @@
  * - 移除未使用的 node-fetch 依赖
  */
 
+import * as http from 'node:http';
 import * as https from 'node:https';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -116,21 +117,50 @@ export async function downloadTransferZip(
 
 // ======================== Internal helpers ========================
 
+const MAX_REDIRECTS = 5;
+
+function followGet(
+  url: string,
+  opts: https.RequestOptions,
+  onResponse: (res: http.IncomingMessage) => void,
+  onError: (err: Error) => void,
+  redirectsLeft = MAX_REDIRECTS,
+): http.ClientRequest {
+  const get = url.startsWith('https') ? https.get : http.get;
+  const req = get(url, opts, (res) => {
+    const status = res.statusCode ?? 0;
+    if ((status === 301 || status === 302 || status === 307 || status === 308) && res.headers.location) {
+      res.resume();
+      if (redirectsLeft <= 0) {
+        onError(new Error(`重定向次数超限（${MAX_REDIRECTS}）`));
+        return;
+      }
+      followGet(res.headers.location, opts, onResponse, onError, redirectsLeft - 1);
+      return;
+    }
+    onResponse(res);
+  }).on('error', onError);
+  return req;
+}
+
 function httpsGetJson<T>(url: string, timeout: number): Promise<T> {
   return new Promise((resolve, reject) => {
-    const req = https
-      .get(url, { rejectUnauthorized: false }, (res) => {
+    const req = followGet(
+      url,
+      { rejectUnauthorized: false },
+      (res) => {
         let data = '';
         res.on('data', (chunk: string) => (data += chunk));
         res.on('end', () => {
           try {
             resolve(JSON.parse(data) as T);
           } catch {
-            reject(new Error(`API 响应不是有效 JSON: ${data.slice(0, 200)}`));
+            reject(new Error(`API 响应不是有效 JSON (HTTP ${res.statusCode}): ${data.slice(0, 200)}`));
           }
         });
-      })
-      .on('error', reject);
+      },
+      reject,
+    );
     req.setTimeout(timeout, () => {
       req.destroy(new Error(`请求超时（${timeout}ms）`));
     });
@@ -139,13 +169,16 @@ function httpsGetJson<T>(url: string, timeout: number): Promise<T> {
 
 function httpsGetBuffer(url: string, timeout: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const req = https
-      .get(url, { rejectUnauthorized: false }, (res) => {
+    const req = followGet(
+      url,
+      { rejectUnauthorized: false },
+      (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
         res.on('end', () => resolve(Buffer.concat(chunks)));
-      })
-      .on('error', reject);
+      },
+      reject,
+    );
     req.setTimeout(timeout, () => {
       req.destroy(new Error(`请求超时（${timeout}ms）`));
     });
