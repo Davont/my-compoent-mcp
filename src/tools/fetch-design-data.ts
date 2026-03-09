@@ -162,6 +162,7 @@ export const fetchDesignDataTool: Tool = {
         description: '本地已有同名文件时是否覆盖，默认 true。',
       },
     },
+    additionalProperties: false,
   },
 };
 
