@@ -229,27 +229,19 @@ export async function handleFetchDesignData(
     const savedFiles: string[] = [];
 
     for (const file of result.files) {
-      const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-      const baseName = file.name.includes('.')
-        ? file.name.slice(0, file.name.lastIndexOf('.'))
-        : file.name;
-      const targetName = saveName ? `${saveName}${ext}` : `${baseName}${ext}`;
-      const targetPath = resolve(octoDir, targetName);
-
+      const targetPath = resolve(octoDir, file.name);
       if (!targetPath.startsWith(resolvedOctoDir + sep)) {
         continue;
       }
-
       if (!overwrite && existsSync(targetPath)) {
-        savedFiles.push(`${targetName}（已存在，跳过）`);
+        savedFiles.push(`${file.name}（已存在，跳过）`);
         continue;
       }
-
       try {
         writeFileSync(targetPath, file.content, 'utf-8');
-        savedFiles.push(targetName);
+        savedFiles.push(file.name);
       } catch {
-        savedFiles.push(`${targetName}（写入失败）`);
+        savedFiles.push(`${file.name}（写入失败）`);
       }
     }
 
@@ -261,18 +253,9 @@ export async function handleFetchDesignData(
     lines.push(`| 原始压缩包 | ${result.zipName} |`);
     lines.push(`| 文件数 | ${savedFiles.length} |`);
     lines.push('');
-    lines.push('保存的文件：');
+    lines.push('保存到 .octo/ 的文件：');
     for (const f of savedFiles) {
       lines.push(`- \`${f}\``);
-    }
-
-    const primaryFile = savedFiles.find(f => !f.includes('（'));
-    if (primaryFile) {
-      const baseName = primaryFile.includes('.')
-        ? primaryFile.slice(0, primaryFile.lastIndexOf('.'))
-        : primaryFile;
-      lines.push('');
-      lines.push(`> 下一步：调用 \`design_to_code({ file: "${baseName}" })\` 转换为代码。`);
     }
 
     return {

@@ -57,8 +57,8 @@ export function decodeSharePassword(str: string): string | undefined {
 }
 
 /**
- * 通过设计稿 code 下载 ZIP 包、解压、读取 index-px.vue 内容。
- * @returns Vue 文件内容 + 原始文件名
+ * 通过设计稿 code 下载 ZIP 包并解压，返回所有文件内容。
+ * @returns 解压后的文件列表 + 原始 ZIP 文件名
  * @throws 网络错误、解压错误、文件缺失
  */
 export async function downloadTransferZip(
@@ -160,14 +160,13 @@ function safeJsonParse<T>(str: string): T | undefined {
   }
 }
 
-async function readExtractedFiles(dir: string, base = ''): Promise<TransferFile[]> {
+async function readExtractedFiles(dir: string): Promise<TransferFile[]> {
   const entries = await fsp.readdir(dir, { withFileTypes: true });
   const results: TransferFile[] = [];
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);
-    const relName = base ? `${base}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      results.push(...await readExtractedFiles(fullPath, relName));
+      results.push(...await readExtractedFiles(fullPath));
     } else if (entry.isFile()) {
       const content = await fsp.readFile(fullPath, 'utf-8');
       results.push({ name: entry.name, content });

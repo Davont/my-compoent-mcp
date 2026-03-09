@@ -83,6 +83,7 @@ interface FetchResult {
   saveName: string;
   ext: string;
   sourceDesc: string;
+  savedFiles: string[];
 }
 
 async function fetchByShareCode(
@@ -100,26 +101,25 @@ async function fetchByShareCode(
     return { content: [{ type: 'text', text: `分享口令下载失败: ${msg}` }], isError: true };
   }
 
-  const codeFile = result.files[0];
-  if (!codeFile) {
-    return { content: [{ type: 'text', text: '解压成功但未找到任何文件' }], isError: true };
-  }
-
-  const ext = codeFile.name.includes('.')
-    ? codeFile.name.slice(codeFile.name.lastIndexOf('.'))
-    : '';
-  const targetPath = resolve(octoDir, `${saveName}${ext}`);
-
-  if (!overwrite && existsSync(targetPath)) {
-    return {
-      content: [{ type: 'text', text: `文件 "${saveName}${ext}" 已存在，跳过下载。设置 overwrite: true 可覆盖。` }],
-    };
-  }
-
   ensureOctoDir(octoDir);
-  writeFileSync(targetPath, codeFile.content, 'utf-8');
+  const resolvedOctoDir = resolve(octoDir);
+  const savedFiles: string[] = [];
 
-  return { saveName, ext, sourceDesc: `分享口令 ${code}（原始文件: ${result.zipName}）` };
+  for (const file of result.files) {
+    const targetPath = resolve(octoDir, file.name);
+    if (!targetPath.startsWith(resolvedOctoDir + sep)) continue;
+    if (!overwrite && existsSync(targetPath)) {
+      savedFiles.push(`${file.name}（跳过）`);
+      continue;
+    }
+    writeFileSync(targetPath, file.content, 'utf-8');
+    savedFiles.push(file.name);
+  }
+
+  const vueFile = savedFiles.find(f => f.endsWith('.vue') && !f.includes('（'));
+  const ext = vueFile ? '.vue' : (savedFiles[0]?.slice(savedFiles[0].lastIndexOf('.')) ?? '');
+
+  return { saveName, ext, sourceDesc: `分享口令 ${code}（原始压缩包: ${result.zipName}）`, savedFiles };
 }
 
 async function fetchByFileKey(
@@ -178,7 +178,7 @@ async function fetchByFileKey(
     ensureOctoDir(octoDir);
     writeFileSync(targetPath, JSON.stringify(json), 'utf-8');
 
-    return { saveName, ext: '.json', sourceDesc: `fileKey ${fileKey}${nodeId ? ` (node: ${nodeId})` : ''}` };
+    return { saveName, ext: '.json', sourceDesc: `fileKey ${fileKey}${nodeId ? ` (node: ${nodeId})` : ''}`, savedFiles: [`${saveName}.json`] };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       return { content: [{ type: 'text', text: `请求超时（${timeout}ms）。尝试增大 timeout 或使用 nodeId 缩小范围。` }], isError: true };
