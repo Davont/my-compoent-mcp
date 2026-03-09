@@ -3,7 +3,7 @@
  *
  * 从 Octo 平台下载设计稿到本地 .octo/ 目录，支持两种数据源：
  * - fileKey 模式：通过 Octo REST API 拉取原始 Figma JSON（需配置 Token）
- * - shareCode 模式：通过分享口令下载服务端预生成的 Vue 代码（无需 Token）
+ * - shareCode 模式：通过分享口令下载 ZIP 并原样解压到 .octo/（无需 Token）
  *
  * 下载完成后配合 design_to_code 工具完成设计稿转代码。
  */
@@ -17,7 +17,7 @@ import {
   ENV_OCTO_TOKEN,
   FETCH_DESIGN_TIMEOUT,
 } from '../config.js';
-import { decodeSharePassword, downloadTransferZip } from '../utils/octo-transfer.js';
+import { decodeSharePassword, extractTransferZipToDir } from '../utils/octo-transfer.js';
 import { OctoFileInfo, listOctoFiles } from '../utils/octo-files.js';
 
 const SAFE_FILENAME_RE = /^[\w-]+$/;
@@ -130,10 +130,13 @@ async function fetchFromOcto(opts: OctoFetchOptions): Promise<OctoFetchResult> {
 export const fetchDesignDataTool: Tool = {
   name: 'fetch_design_data',
   description:
-    '从 Octo 平台下载设计稿到本地 .octo/ 目录。只负责下载，不做转换。\n\n' +
-    '传入 input 参数，工具自动识别类型：\n' +
-    '- 包含 ## 的字符串（如 "##53085E4C##"）→ 分享口令模式，直接下载预生成的代码文件，无需 Token\n' +
-    '- 其他字符串（如 "abc123"）→ fileKey 模式，下载原始设计稿 JSON，需配置 OCTO_API_BASE 和 OCTO_TOKEN\n\n' +
+    '从 Octo 平台下载设计稿到本地 .octo/ 目录，供 design_to_code 工具使用。\n\n' +
+    '传入 input 参数即可，工具自动识别类型：\n' +
+    '- 包含 ## 的字符串（如 "##53085E4C##"）→ 分享口令模式，下载 ZIP 并原样解压到 .octo/，无需配置 Token\n' +
+    '- 其他字符串（如 "abc123"）→ fileKey 模式，下载原始 Figma JSON（需配置 OCTO_API_BASE 和 OCTO_TOKEN）\n\n' +
+    '使用流程：\n' +
+    '1. 调用本工具下载设计稿：`fetch_design_data({ input: "##53085E4C##" })`\n' +
+    '2. 调用 `design_to_code({ file: "xxx" })` 转换为代码\n\n' +
     '不传 input 时列出本地已有文件。',
   inputSchema: {
     type: 'object',
@@ -162,7 +165,6 @@ export const fetchDesignDataTool: Tool = {
         description: '本地已有同名文件时是否覆盖，默认 true。',
       },
     },
-    additionalProperties: false,
   },
 };
 
@@ -197,24 +199,12 @@ export async function handleFetchDesignData(
   if (isShareMode) {
     const code = shareCodeId;
 
-    const saveName = rawSaveName || code.replace(/[^\w-]/g, '_');
-    if (!SAFE_FILENAME_RE.test(saveName)) {
+    if (rawSaveName && !SAFE_FILENAME_RE.test(rawSaveName)) {
       return {
         content: [{
           type: 'text',
-          text: `文件名 "${saveName}" 包含非法字符。只允许字母、数字、连字符（-）和下划线（_）。`,
+          text: `文件名 "${rawSaveName}" 包含非法字符。只允许字母、数字、连字符（-）和下划线（_）。`,
         }],
-        isError: true,
-      };
-    }
-
-    let result;
-    try {
-      result = await downloadTransferZip(code, { timeout });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      return {
-        content: [{ type: 'text', text: `分享口令下载失败: ${msg}` }],
         isError: true,
       };
     }
@@ -223,37 +213,64 @@ export async function handleFetchDesignData(
       mkdirSync(octoDir, { recursive: true });
     }
 
-    const resolvedOctoDir = resolve(octoDir);
-    const savedFiles: string[] = [];
-
-    for (const file of result.files) {
-      const targetPath = resolve(octoDir, file.name);
-      if (!targetPath.startsWith(resolvedOctoDir + sep)) {
-        continue;
-      }
-      if (!overwrite && existsSync(targetPath)) {
-        savedFiles.push(`${file.name}（已存在，跳过）`);
-        continue;
-      }
-      try {
-        writeFileSync(targetPath, file.content, 'utf-8');
-        savedFiles.push(file.name);
-      } catch {
-        savedFiles.push(`${file.name}（写入失败）`);
-      }
+    let zipName: string;
+    let savedFiles: string[];
+    let skippedFiles: string[];
+    try {
+      const result = await extractTransferZipToDir(code, octoDir, { timeout, overwrite });
+      zipName = result.zipName;
+      savedFiles = result.savedFiles;
+      skippedFiles = result.skippedFiles;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text', text: `分享口令下载失败: ${msg}` }],
+        isError: true,
+      };
     }
+
+    if (savedFiles.length === 0 && skippedFiles.length > 0 && !overwrite) {
+      return {
+        content: [{
+          type: 'text',
+          text: '压缩包已下载，但所有目标文件已存在且 overwrite=false，未写入新文件。',
+        }],
+      };
+    }
+
+    const rootOctoFiles = listOctoFiles(octoDir);
+    const previewFiles = savedFiles.slice(0, 12);
 
     const lines: string[] = [];
     lines.push('# 设计稿下载完成（分享口令模式）\n');
     lines.push(`| 项目 | 值 |`);
     lines.push(`|------|------|`);
     lines.push(`| 来源 | 分享口令 ${code} |`);
-    lines.push(`| 原始压缩包 | ${result.zipName} |`);
-    lines.push(`| 文件数 | ${savedFiles.length} |`);
+    lines.push(`| 原始压缩包 | ${zipName} |`);
+    lines.push(`| 新写入文件 | ${savedFiles.length} |`);
+    lines.push(`| 已跳过文件 | ${skippedFiles.length} |`);
+
+    if (rawSaveName) {
+      lines.push('');
+      lines.push(`> 提示：shareCode 模式会按压缩包原始路径解压，\`saveName\` 参数在该模式下不重命名文件。`);
+    }
+
+    if (previewFiles.length > 0) {
+      lines.push('');
+      lines.push('写入文件（最多显示 12 条）：');
+      for (const file of previewFiles) {
+        lines.push(`- \`${file}\``);
+      }
+      if (savedFiles.length > previewFiles.length) {
+        lines.push(`- ... 共 ${savedFiles.length} 个`);
+      }
+    }
+
     lines.push('');
-    lines.push('保存到 .octo/ 的文件：');
-    for (const f of savedFiles) {
-      lines.push(`- \`${f}\``);
+    if (rootOctoFiles.length > 0) {
+      lines.push(`> 下一步：调用 \`design_to_code({ file: "${rootOctoFiles[0].name}" })\` 转换为代码。`);
+    } else {
+      lines.push('> 已解压到 .octo/，当前根目录未检测到可直接转换的 .json/.vue 文件。');
     }
 
     return {

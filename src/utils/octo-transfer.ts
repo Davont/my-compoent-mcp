@@ -2,18 +2,17 @@
  * Octo 分享口令 → 设计稿 ZIP 下载 & 解压
  *
  * 从 Octo 平台的「传送口令」API 下载预生成的设计稿 ZIP 包，
- * 解压后返回 Vue 文件内容，供 fetch_design_data 保存到 .octo/ 目录。
+ * 可按需读取 index-px.vue，或直接解压到目标目录。
  *
  * 原始逻辑来自 getDSL.mjs，此处用 TypeScript 重写并修复：
  * - 类型安全
- * - 解压到 os.tmpdir()（不污染源码目录）
+ * - 支持直接解压到指定目录
  * - 统一抛 Error（不返回 undefined）
  * - 移除未使用的 node-fetch 依赖
  */
 
 import * as https from 'node:https';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { basename, dirname, resolve, sep } from 'node:path';
 import { promises as fsp } from 'node:fs';
 import AdmZip from 'adm-zip';
 
@@ -31,18 +30,23 @@ interface TransferApiResponse {
   fileList?: Array<{ path?: string; name?: string }>;
 }
 
-export interface TransferFile {
-  name: string;
-  content: string;
-}
-
 export interface TransferDownloadResult {
-  files: TransferFile[];
-  zipName: string;
+  vueContent: string;
+  fileName: string;
 }
 
 export interface TransferOptions {
   timeout?: number;
+}
+
+export interface TransferExtractOptions extends TransferOptions {
+  overwrite?: boolean;
+}
+
+export interface TransferExtractResult {
+  zipName: string;
+  savedFiles: string[];
+  skippedFiles: string[];
 }
 
 // ======================== Public API ========================
@@ -57,8 +61,8 @@ export function decodeSharePassword(str: string): string | undefined {
 }
 
 /**
- * 通过设计稿 code 下载 ZIP 包并解压，返回所有文件内容。
- * @returns 解压后的文件列表 + 原始 ZIP 文件名
+ * 通过设计稿 code 下载 ZIP 包、解压、读取 index-px.vue 内容。
+ * @returns Vue 文件内容 + 原始文件名
  * @throws 网络错误、解压错误、文件缺失
  */
 export async function downloadTransferZip(
@@ -66,52 +70,68 @@ export async function downloadTransferZip(
   options?: TransferOptions,
 ): Promise<TransferDownloadResult> {
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT;
-  const url = `${TRANSFER_ORIGIN}${TRANSFER_API_PATH}?code=${encodeURIComponent(code)}`;
+  const { zip, zipName } = await fetchTransferZipArchive(code, timeout);
 
-  const apiData = await httpsGetJson<TransferApiResponse>(url, timeout);
+  const vueEntry = zip
+    .getEntries()
+    .find((entry) => !entry.isDirectory && basename(normalizeZipEntryName(entry.entryName)) === 'index-px.vue');
 
-  const { info, baseUrl, fileList } = apiData;
-  const parsedInfo = info ? safeJsonParse<{ action?: string }>(info) : undefined;
-  const action = parsedInfo?.action;
-
-  if (!baseUrl || action !== 'developerPreview_exportData') {
-    throw new Error(
-      `分享口令无效或非开发者预览导出（action=${action ?? 'undefined'}）`,
-    );
+  if (!vueEntry) {
+    throw new Error('解压成功但未找到 index-px.vue');
   }
 
-  const firstFile = fileList?.[0];
-  if (!firstFile?.path || !firstFile?.name) {
-    throw new Error('API 返回的 fileList 为空或缺少 path/name 字段');
+  return { vueContent: vueEntry.getData().toString('utf-8'), fileName: zipName };
+}
+
+/**
+ * 下载分享口令 ZIP 并直接解压到目标目录。
+ * 文件按压缩包内相对路径写入，保持目录结构。
+ */
+export async function extractTransferZipToDir(
+  code: string,
+  targetDir: string,
+  options?: TransferExtractOptions,
+): Promise<TransferExtractResult> {
+  const timeout = options?.timeout ?? DEFAULT_TIMEOUT;
+  const overwrite = options?.overwrite !== false;
+
+  const { zip, zipName } = await fetchTransferZipArchive(code, timeout);
+
+  await fsp.mkdir(targetDir, { recursive: true });
+
+  const resolvedTargetDir = resolve(targetDir);
+  const savedFiles: string[] = [];
+  const skippedFiles: string[] = [];
+
+  for (const entry of zip.getEntries()) {
+    const relPath = normalizeZipEntryName(entry.entryName);
+    if (!relPath) continue;
+
+    const targetPath = resolve(targetDir, relPath);
+    if (!isPathInside(targetPath, resolvedTargetDir)) {
+      throw new Error(`ZIP 路径越界: ${entry.entryName}`);
+    }
+
+    if (entry.isDirectory) {
+      await fsp.mkdir(targetPath, { recursive: true });
+      continue;
+    }
+
+    if (!overwrite && await pathExists(targetPath)) {
+      skippedFiles.push(relPath);
+      continue;
+    }
+
+    await fsp.mkdir(dirname(targetPath), { recursive: true });
+    await fsp.writeFile(targetPath, entry.getData());
+    savedFiles.push(relPath);
   }
 
-  const safeName = firstFile.name.replace(/[^\w.-]/g, '_');
-  if (!SAFE_NAME_RE.test(safeName)) {
-    throw new Error(`远端文件名清洗后仍不合法: "${firstFile.name}"`);
+  if (savedFiles.length === 0 && skippedFiles.length === 0) {
+    throw new Error('ZIP 解压后未发现任何可写入文件');
   }
 
-  const fileUrl = `${baseUrl}${code}/${firstFile.path}`;
-  const zipBuffer = await httpsGetBuffer(fileUrl, timeout);
-
-  const workDir = join(tmpdir(), `octo-transfer-${code}-${Date.now()}`);
-  await fsp.mkdir(workDir, { recursive: true });
-
-  const zipPath = join(workDir, `${safeName}.zip`);
-  const extractDir = join(workDir, safeName);
-
-  await fsp.writeFile(zipPath, zipBuffer);
-
-  const zip = new AdmZip(zipPath);
-  zip.extractAllTo(extractDir, true);
-
-  const files = await readExtractedFiles(extractDir);
-  if (files.length === 0) {
-    throw new Error(`解压成功但目录为空（解压目录: ${extractDir}）`);
-  }
-
-  cleanupAsync(workDir);
-
-  return { files, zipName: firstFile.name };
+  return { zipName, savedFiles, skippedFiles };
 }
 
 // ======================== Internal helpers ========================
@@ -152,6 +172,35 @@ function httpsGetBuffer(url: string, timeout: number): Promise<Buffer> {
   });
 }
 
+async function fetchTransferZipArchive(code: string, timeout: number): Promise<{ zip: AdmZip; zipName: string }> {
+  const url = `${TRANSFER_ORIGIN}${TRANSFER_API_PATH}?code=${encodeURIComponent(code)}`;
+  const apiData = await httpsGetJson<TransferApiResponse>(url, timeout);
+
+  const { info, baseUrl, fileList } = apiData;
+  const parsedInfo = info ? safeJsonParse<{ action?: string }>(info) : undefined;
+  const action = parsedInfo?.action;
+
+  if (!baseUrl || action !== 'developerPreview_exportData') {
+    throw new Error(
+      `分享口令无效或非开发者预览导出（action=${action ?? 'undefined'}）`,
+    );
+  }
+
+  const firstFile = fileList?.[0];
+  if (!firstFile?.path || !firstFile?.name) {
+    throw new Error('API 返回的 fileList 为空或缺少 path/name 字段');
+  }
+
+  const safeName = firstFile.name.replace(/[^\w.-]/g, '_');
+  if (!SAFE_NAME_RE.test(safeName)) {
+    throw new Error(`远端文件名清洗后仍不合法: "${firstFile.name}"`);
+  }
+
+  const fileUrl = `${baseUrl}${code}/${firstFile.path}`;
+  const zipBuffer = await httpsGetBuffer(fileUrl, timeout);
+  return { zip: new AdmZip(zipBuffer), zipName: firstFile.name };
+}
+
 function safeJsonParse<T>(str: string): T | undefined {
   try {
     return JSON.parse(str) as T;
@@ -160,22 +209,19 @@ function safeJsonParse<T>(str: string): T | undefined {
   }
 }
 
-async function readExtractedFiles(dir: string): Promise<TransferFile[]> {
-  const entries = await fsp.readdir(dir, { withFileTypes: true });
-  const results: TransferFile[] = [];
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...await readExtractedFiles(fullPath));
-    } else if (entry.isFile()) {
-      const content = await fsp.readFile(fullPath, 'utf-8');
-      results.push({ name: entry.name, content });
-    }
-  }
-  return results;
+function normalizeZipEntryName(name: string): string {
+  return name.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
 }
 
-/** 后台删除临时目录，不阻塞返回 */
-function cleanupAsync(dir: string): void {
-  fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+function isPathInside(targetPath: string, parentPath: string): boolean {
+  return targetPath === parentPath || targetPath.startsWith(parentPath + sep);
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fsp.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
 }

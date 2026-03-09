@@ -19,7 +19,7 @@ import {
   renderLayoutPageWithCss,
 } from '../../octo/core.js';
 import type { LayoutNode, CompressOptions } from '../../octo/core.js';
-import { decodeSharePassword, downloadTransferZip } from '../../utils/octo-transfer.js';
+import { decodeSharePassword, extractTransferZipToDir } from '../../utils/octo-transfer.js';
 import { listOctoFiles, type OctoFileInfo } from '../../utils/octo-files.js';
 import {
   ENV_OCTO_DIR,
@@ -81,9 +81,17 @@ function checkPathSafety(octoDir: string, fileName: string): string | null {
 
 interface FetchResult {
   saveName: string;
-  ext: string;
+  ext: '.json' | '.vue';
   sourceDesc: string;
-  savedFiles: string[];
+}
+
+function pickConvertibleFile(files: string[]): string | undefined {
+  if (files.length === 0) return undefined;
+  if (files.includes('index.json')) return 'index.json';
+  if (files.includes('index-px.vue')) return 'index-px.vue';
+  const firstJson = files.find(f => f.endsWith('.json'));
+  if (firstJson) return firstJson;
+  return files.find(f => f.endsWith('.vue'));
 }
 
 async function fetchByShareCode(
@@ -93,33 +101,50 @@ async function fetchByShareCode(
   timeout: number,
   overwrite: boolean,
 ): Promise<CallToolResult | FetchResult> {
-  let result;
+  let zipName: string;
+  let savedFiles: string[];
+  let skippedFiles: string[];
   try {
-    result = await downloadTransferZip(code, { timeout });
+    const result = await extractTransferZipToDir(code, octoDir, { timeout, overwrite });
+    zipName = result.zipName;
+    savedFiles = result.savedFiles;
+    skippedFiles = result.skippedFiles;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return { content: [{ type: 'text', text: `分享口令下载失败: ${msg}` }], isError: true };
   }
 
-  ensureOctoDir(octoDir);
-  const resolvedOctoDir = resolve(octoDir);
-  const savedFiles: string[] = [];
+  const pickFrom = savedFiles.length > 0 ? savedFiles : skippedFiles;
+  const rootConvertibleFiles = pickFrom
+    .filter(f => !f.includes('/'))
+    .filter(f => f.endsWith('.json') || f.endsWith('.vue'));
+  const chosen = pickConvertibleFile(rootConvertibleFiles);
 
-  for (const file of result.files) {
-    const targetPath = resolve(octoDir, file.name);
-    if (!targetPath.startsWith(resolvedOctoDir + sep)) continue;
-    if (!overwrite && existsSync(targetPath)) {
-      savedFiles.push(`${file.name}（跳过）`);
-      continue;
-    }
-    writeFileSync(targetPath, file.content, 'utf-8');
-    savedFiles.push(file.name);
+  if (!chosen) {
+    const stateText = savedFiles.length > 0
+      ? '已完成解压'
+      : '压缩包已下载，但未写入新文件';
+    const overwriteText = !overwrite && skippedFiles.length > 0
+      ? '（overwrite=false，已有文件被跳过）'
+      : '';
+    return {
+      content: [{
+        type: 'text',
+        text:
+          `${stateText}${overwriteText}，但未发现根目录可直接转换的 .json/.vue 文件。\n` +
+          `来源: 分享口令 ${code}（原始压缩包: ${zipName}）`,
+      }],
+    };
   }
 
-  const vueFile = savedFiles.find(f => f.endsWith('.vue') && !f.includes('（'));
-  const ext = vueFile ? '.vue' : (savedFiles[0]?.slice(savedFiles[0].lastIndexOf('.')) ?? '');
+  const ext: '.json' | '.vue' = chosen.endsWith('.json') ? '.json' : '.vue';
+  const derivedName = chosen.slice(0, -ext.length);
 
-  return { saveName, ext, sourceDesc: `分享口令 ${code}（原始压缩包: ${result.zipName}）`, savedFiles };
+  return {
+    saveName: derivedName || saveName,
+    ext,
+    sourceDesc: `分享口令 ${code}（原始压缩包: ${zipName}）`,
+  };
 }
 
 async function fetchByFileKey(
@@ -178,7 +203,7 @@ async function fetchByFileKey(
     ensureOctoDir(octoDir);
     writeFileSync(targetPath, JSON.stringify(json), 'utf-8');
 
-    return { saveName, ext: '.json', sourceDesc: `fileKey ${fileKey}${nodeId ? ` (node: ${nodeId})` : ''}`, savedFiles: [`${saveName}.json`] };
+    return { saveName, ext: '.json', sourceDesc: `fileKey ${fileKey}${nodeId ? ` (node: ${nodeId})` : ''}` };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       return { content: [{ type: 'text', text: `请求超时（${timeout}ms）。尝试增大 timeout 或使用 nodeId 缩小范围。` }], isError: true };
