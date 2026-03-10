@@ -1,66 +1,104 @@
-# my-design MCP 与 Skills
+# @my-design/mcp
 
-## 需求
+my-design 组件库的 MCP Server，让 AI 能够查询组件文档、Props、示例、源码、Design Tokens，生成符合规范的代码。
 
-我自己有一个类似 ant design， semi design 这种前端React 组件库，我想给这个组件库加上 MCP 和 Skills 服务。因为我们的这个组件库是内网，外部大模型没有训练过。
+## 工具一览
 
-## 功能
+| 工具 | 说明 |
+|------|------|
+| `get_context_bundle` | 一次性获取组件的完整上下文（文档 + Props + 示例 + Tokens），适合代码生成场景 |
+| `component_search` | 按关键词搜索组件，返回匹配列表和适用场景 |
+| `component_details` | 获取组件详情（Props、Events、行为说明），支持按章节和属性过滤 |
+| `theme_tokens` | 查询 Design Tokens（颜色、字号、间距等）和 CSS 变量映射 |
+| `changelog_query` | 查询组件变更日志和 breaking changes |
+| `source_inspect` | 查看组件源码结构和关键函数实现 |
+| `fetch_design_data` | 从 Octo 平台下载设计稿到本地（支持分享口令和 fileKey） |
+| `design_to_code` | 将设计稿 JSON 转换为 DSL / HTML / Vue 代码 |
 
-### 核心目标
+## 快速开始
 
-让 AI 在内网环境下，能够基于 my-design 组件库 + `xxx 设计规范` + token：
+### 安装依赖
 
-- **快速选型并生成可落地页面代码**
-- **在升级/迁移/复杂场景下给出可靠的改造建议**
+```bash
+npm install
+```
 
-### 分层设计：MCP vs Skills
+### 构建
 
-- **MCP（工具与资源层）**：提供可调用工具，返回结构化“事实数据”（组件、API、示例、token、变更、资源等）。
-- **Skills（落地与生成层）**：把 MCP 工具组合成可执行工作流（选型 → 实现 → 规范对齐 → 迁移/排查），把“查询”变成“交付”。
+```bash
+npm run build
+```
 
-### MCP 要提供什么（工具与资源）
+### 启动
 
-#### 最小可用（建议优先实现）
+**Stdio 模式**（Cursor / Claude Desktop 等 MCP 客户端）：
 
-- **`component_list`**：按分类/状态/平台列出组件
-- **`component_search`**：按需求检索组件，给出替代方案与适用/不适用条件
-- **`component_details`**：组件 API 详情（`props/slots/events/variants/defaults`、类型、必填、默认值、约束；可补充 a11y/依赖/初始化要求）
-- **`component_examples`**：最小示例与常见组合示例
-- **`theme_tokens`**：token 定义、CSS 变量映射、主题差异与使用规范
-- **`changelog_query`**：`changelog`/breaking changes/迁移提示
+```bash
+node dist/stdio.js
+```
 
-#### 可选增强
+**HTTP 模式**：
 
-- **源码与函数读取**：查看源码结构、样式与关键函数实现（用于深度理解、排查与二开）
-- **版本切换查询**：按版本返回组件文档/示例/变更信息，适配不同项目环境
-- **资源引用（resources）**：返回 Figma 组件链接或预览资源
+```bash
+node dist/http.js --port 3000
+```
 
-### Skills 要提供什么（工作流与生成）
+### MCP 客户端配置
 
-- **规范驱动的页面生成**：把需求转成页面结构与代码，默认遵循 `xxx 设计规范` + token，并输出不符合项的修正建议
-- **选型与替代决策**：基于 `component_search` / `component_details` 输出最终推荐与理由
-- **最佳实践与工作流程**：引入方式、主题定制、常见任务流程（查询组件 → 实现功能 → 排查问题）
-- **迁移与兼容建议**：结合 `changelog_query` 与版本信息输出迁移步骤、风险点与回滚建议
-- **复杂场景处理**：当 props 无法满足需求时的扩展/二开策略与注意事项
+```json
+{
+  "mcpServers": {
+    "my-design": {
+      "command": "node",
+      "args": ["/path/to/dist/stdio.js"]
+    }
+  }
+}
+```
 
-### 设计规范与 Token（部门规范绑定）
+## 环境变量
 
-- **规范**：`xxx 设计规范` 是页面生成与评审的统一约束（交互/视觉/布局/文案等）
-- **Token**：颜色/字号/间距/圆角等 token 定义与主题映射（用于实现与一致性校验）
+| 变量 | 必需 | 说明 |
+|------|------|------|
+| `OCTO_API_BASE` | 否 | Octo API 地址（fileKey 下载模式需要） |
+| `OCTO_TOKEN` | 否 | Octo 认证 Token（fileKey 下载模式需要） |
+| `OCTO_DIR` | 否 | `.octo/` 目录路径，默认当前目录 |
+| `COMPONENT_PACKAGE_ROOT` | 否 | 组件包源码路径（source_inspect 用），默认读 node_modules/@douyinfe/semi-ui |
 
-### 数据源建议
+## 项目结构
 
-- **Storybook 文档或 MDX**：组件元数据、示例与约束的主要来源
+```
+src/
+  tools/          # MCP 工具定义和处理器
+  utils/          # 工具函数（文档读取、源码解析等）
+  server.ts       # MCP Server 创建和配置
+  stdio.ts        # stdio 传输入口
+  http.ts         # HTTP 传输入口
+doc/
+  components/     # 组件文档（Markdown）
+  tokens/         # Design Tokens（JSON）
+  guidelines/     # 设计规范
+  changelog/      # 变更日志
+  index.json      # 组件索引
+tests/
+  tools/          # 工具测试
+  utils/          # 工具函数测试
+```
 
-### 价值（客观收益）
+## 开发
 
-- **提升可发现性**：新人更快找到正确组件与用法
-- **降低错误率**：基于约束与规范减少误用
-- **缩短接入时间**：减少文档翻找与上下文切换
-- **变更可控**：迁移与影响范围更透明
-- **让 LLM 能执行**：把“问答”升级为“可调用的工具链”
+```bash
+npm run build          # 构建
+npm run dev            # watch 模式
+npx rstest run         # 运行测试
+```
 
-## 参考
+## 控量策略
 
-[magicui MCP 文档](https://magicui.design/docs/mcp)
-[semi UI MCP 文档](https://semi.design/zh-CN/start/mcp-skills)
+工具设计遵循渐进式获取，减少 token 消耗：
+
+- `component_details` brief 模式只返回概述 + Props 名称列表
+- `sections` 参数按需获取指定章节
+- `propFilter` 只返回指定属性
+- 大文档自动隐藏代码块，配合 `get_code_block` 按需获取
+- `get_context_bundle` 一次打包常用上下文，减少多次调用
