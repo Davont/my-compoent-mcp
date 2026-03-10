@@ -10,8 +10,7 @@
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, mkdirSync, writeFileSync, statSync } from 'fs';
-import { join, resolve, sep, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join, resolve, sep } from 'path';
 import {
   ENV_OCTO_DIR,
   ENV_OCTO_API_BASE,
@@ -21,15 +20,12 @@ import {
 import { decodeSharePassword, extractTransferZipToDir } from '../utils/octo-transfer.js';
 import { OctoFileInfo, listOctoFiles } from '../utils/octo-files.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 const SAFE_FILENAME_RE = /^[\w-]+$/;
 
 function getOctoDir(): string {
   const envDir = process.env[ENV_OCTO_DIR];
   if (envDir) return envDir;
-  return join(__dirname, '.octo');
+  return join(process.cwd(), '.octo');
 }
 
 function countNodes(obj: unknown): number {

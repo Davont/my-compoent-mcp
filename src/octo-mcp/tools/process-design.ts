@@ -11,8 +11,7 @@
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'fs';
-import { join, resolve, sep, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join, resolve, sep } from 'path';
 import {
   processDesign,
   compressDSL,
@@ -35,13 +34,10 @@ const SAFE_FILENAME_RE = /^[\w-]+$/;
 
 // ======================== 辅助函数 ========================
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 function getOctoDir(): string {
   const envDir = process.env[ENV_OCTO_DIR];
   if (envDir) return envDir;
-  return join(__dirname, '.octo');
+  return join(process.cwd(), '.octo');
 }
 
 function formatBytes(bytes: number): string {
