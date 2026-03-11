@@ -1,7 +1,7 @@
 /**
  * component_list 工具
  * 
- * 获取 my-design 组件库的组件列表
+ * 获取 MCP 组件库的组件列表
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';

@@ -46,7 +46,7 @@ export const DEFAULT_IMPORT_STYLE: 'named' | 'default' = 'named';
  * 文档子目录名
  *
  * 指定 doc/ 下的子目录作为文档根，用于同仓库维护多套组件库文档。
- * - 空字符串 ''：直接使用 doc/（my-design）
+ * - 空字符串 ''：直接使用 doc/（MCP）
  * - 'semi'：使用 doc/semi/
  *
  * 可通过环境变量 DOC_SUBDIR 覆盖

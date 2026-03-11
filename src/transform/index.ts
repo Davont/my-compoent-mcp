@@ -22,7 +22,7 @@ export type TransformMode = 'dsl' | 'html';
 export interface TransformResult {
   mode: TransformMode;
   content: string;
-  /** 设计稿中识别出的 my-design 组件名列表，如 ["Button", "Input", "Modal"] */
+  /** 设计稿中识别出的 MCP 组件名列表，如 ["Button", "Input", "Modal"] */
   recommendedComponents?: string[];
   /** HTML 模式专用：独立 CSS（含 base styles + 组件样式） */
   css?: string;
@@ -201,7 +201,7 @@ function fallbackTransform(json: unknown, mode: TransformMode): TransformResult 
 // ======================== 组件识别 ========================
 
 /**
- * 从 LayoutNode 树中识别可能对应 my-design 组件的节点。
+ * 从 LayoutNode 树中识别可能对应 MCP 组件的节点。
  *
  * 策略：
  * 1. 收集所有 INSTANCE / COMPONENT 节点的 name 及其分词

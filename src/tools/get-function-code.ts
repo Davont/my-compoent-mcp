@@ -11,8 +11,8 @@ import { PACKAGE_NAME } from '../config.js';
 
 /**
  * 解析文件路径
- * 输入: @my-design/react/Button/index.tsx
- * 输出: { packageName: '@my-design/react', relativePath: 'Button/index.tsx' }
+ * 输入: @MCP/react/Button/index.tsx
+ * 输出: { packageName: '@MCP/react', relativePath: 'Button/index.tsx' }
  */
 function parseFilePath(fullPath: string): { packageName: string; relativePath: string } | null {
   const match = fullPath.match(/^(@[^/]+\/[^/]+)\/(.+)$/);

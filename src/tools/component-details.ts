@@ -1,7 +1,7 @@
 /**
  * component_details 工具
  * 
- * 获取 my-design 组件的详细文档（Props、Behavior、核心规则等）
+ * 获取 MCP 组件的详细文档（Props、Behavior、核心规则等）
  * 
  * 控量策略：
  * - brief 模式：只返回组件概述 + 可用章节 + Props 名称列表（极轻量）

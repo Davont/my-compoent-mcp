@@ -1,5 +1,5 @@
 /**
- * my-design MCP Server 共享配置
+ * MCP Server 共享配置
  * 
  * 这个模块导出 MCP 服务器的配置和处理器注册逻辑，
  * 可以被 stdio 和 HTTP 两种入口共用

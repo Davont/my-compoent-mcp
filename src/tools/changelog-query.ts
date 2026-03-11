@@ -1,7 +1,7 @@
 /**
  * changelog_query 工具
  * 
- * 查询 my-design 组件库的变更日志和迁移指南
+ * 查询 MCP 组件库的变更日志和迁移指南
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';

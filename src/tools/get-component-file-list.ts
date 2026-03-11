@@ -1,7 +1,7 @@
 /**
  * get_component_file_list 工具
  *
- * 获取 my-design 组件的所有源码文件路径列表
+ * 获取 MCP 组件的所有源码文件路径列表
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';

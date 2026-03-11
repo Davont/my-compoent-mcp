@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * my-design MCP Server - HTTP (Streamable) 入口
+ * MCP Server - HTTP (Streamable) 入口
  * 
  * 使用 Streamable HTTP 作为传输层的 MCP 服务器
  * 这是 MCP 推荐的服务化部署方案，支持无状态通信和连接恢复

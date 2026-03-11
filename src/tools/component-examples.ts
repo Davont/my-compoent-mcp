@@ -1,7 +1,7 @@
 /**
  * component_examples 工具
  * 
- * 获取 my-design 组件的代码示例
+ * 获取 MCP 组件的代码示例
  * 
  * 控量策略：
  * - 不传 exampleName → 只返回示例目录（名称 + 描述），不含代码

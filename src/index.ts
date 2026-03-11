@@ -1,5 +1,5 @@
 /**
- * my-design MCP Server
+ * MCP Server
  * 
  * 主导出文件
  */

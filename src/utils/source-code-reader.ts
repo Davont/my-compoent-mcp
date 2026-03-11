@@ -1,7 +1,7 @@
 /**
  * 组件源码读取工具
  *
- * 从本地 node_modules 中读取 @my-design/react 组件源码
+ * 从本地 node_modules 中读取 @MCP/react 组件源码
  * 用于源码查看、文件列表获取等场景
  */
 
@@ -96,7 +96,7 @@ function shouldExcludePath(filePath: string): boolean {
   return false;
 }
 
-// @my-design/react -> scoped; some-package -> unscoped
+// @MCP/react -> scoped; some-package -> unscoped
 function extractPackageName(packageRoot: string): string {
   const parts = packageRoot.replace(/\\/g, '/').split('/');
   if (parts.length >= 2 && parts[parts.length - 2].startsWith('@')) {

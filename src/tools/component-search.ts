@@ -1,7 +1,7 @@
 /**
  * component_search 工具
  * 
- * 搜索 my-design 组件库的组件
+ * 搜索 MCP 组件库的组件
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';

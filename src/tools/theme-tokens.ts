@@ -1,7 +1,7 @@
 /**
  * theme_tokens 工具
  * 
- * 获取 my-design 的 Design Token 和主题信息
+ * 获取 MCP 的 Design Token 和主题信息
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
