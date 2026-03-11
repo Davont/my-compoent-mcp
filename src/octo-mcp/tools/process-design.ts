@@ -11,7 +11,7 @@
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'fs';
-import { join, resolve, sep } from 'path';
+import { isAbsolute, join, resolve, sep } from 'path';
 import {
   processDesign,
   compressDSL,
@@ -34,7 +34,8 @@ const SAFE_FILENAME_RE = /^[\w-]+$/;
 
 // ======================== 辅助函数 ========================
 
-function getOctoDir(): string {
+function getOctoDir(argDir?: string): string {
+  if (argDir) return join(argDir, '.octo');
   const envDir = process.env[ENV_OCTO_DIR];
   if (envDir) return envDir;
   return join(process.cwd(), '.octo');
@@ -75,6 +76,41 @@ function checkPathSafety(octoDir: string, fileName: string): string | null {
     return `路径安全检查失败: ${fileName}`;
   }
   return null;
+}
+
+function syncOctoDirToSettings(projectRoot: string): void {
+  const codemateDir = join(projectRoot, '.codemate');
+  if (!existsSync(codemateDir)) return;
+
+  const settingsPath = join(codemateDir, 'mcp', 'mcp_settings.json');
+  if (!existsSync(settingsPath)) return;
+
+  let config: Record<string, unknown>;
+  try {
+    config = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+  } catch {
+    return;
+  }
+
+  const servers = config.mcpServers as Record<string, Record<string, unknown>> | undefined;
+  if (!servers || typeof servers !== 'object') return;
+
+  const lowerKeys = Object.keys(servers);
+  const serverKey = lowerKeys.find(k => {
+    const lk = k.toLowerCase();
+    return lk === 'octo-design' || lk === 'octo-mcp' || lk.includes('octo-mcp');
+  });
+  if (!serverKey) return;
+
+  const env = servers[serverKey]?.env as Record<string, string> | undefined;
+  if (!env || typeof env !== 'object') return;
+
+  const expected = join(projectRoot, '.octo');
+  const current = env.OCTO_DIR;
+  if (current === expected) return;
+
+  env.OCTO_DIR = expected;
+  writeFileSync(settingsPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
 // ======================== 下载逻辑 ========================
@@ -475,6 +511,11 @@ export const getDesignDataTool: Tool = {
         type: 'boolean',
         description: '本地已有同名文件时是否覆盖，默认 true。',
       },
+      projectRoot: {
+        type: 'string',
+        description:
+          '项目根目录的绝对路径（如 "/home/user/my-project"），设计稿文件将存放在该目录下的 .octo/ 子目录中。必须是绝对路径。',
+      },
     },
   },
 };
@@ -492,8 +533,16 @@ export async function handleGetDesignData(
   const rawSaveName = typeof args?.saveName === 'string' ? args.saveName.trim() : undefined;
   const timeout = typeof args?.timeout === 'number' && args.timeout > 0 ? args.timeout : FETCH_TIMEOUT;
   const overwrite = args?.overwrite !== false;
+  const rawProjectRoot = typeof args?.projectRoot === 'string' ? args.projectRoot.trim() : undefined;
 
-  const octoDir = getOctoDir();
+  if (rawProjectRoot && !isAbsolute(rawProjectRoot)) {
+    return {
+      content: [{ type: 'text', text: `projectRoot 必须是绝对路径，当前传入: "${rawProjectRoot}"` }],
+      isError: true,
+    };
+  }
+
+  const octoDir = getOctoDir(rawProjectRoot);
 
   // 无参数：列出本地文件
   if (!rawInput && !rawFile) {
@@ -543,6 +592,7 @@ export async function handleGetDesignData(
       if (outPathErr) return { content: [{ type: 'text', text: outPathErr }], isError: true };
       const outPath = join(octoDir, `${outName}.output.vue`);
       writeFileSync(outPath, vueContent, 'utf-8');
+      if (rawProjectRoot) syncOctoDirToSettings(rawProjectRoot);
       return {
         content: [{
           type: 'text',
@@ -570,6 +620,7 @@ export async function handleGetDesignData(
     const transformResult = transformAndSave(json, saveName, octoDir, outputMode);
     if (!isTransformOutput(transformResult)) return transformResult;
 
+    if (rawProjectRoot) syncOctoDirToSettings(rawProjectRoot);
     return {
       content: [{ type: 'text', text: formatResult({ saveName, transformOutput: transformResult }) }],
     };
@@ -618,6 +669,7 @@ export async function handleGetDesignData(
     }
     lines.push('');
     lines.push('> 任务完成。文件已就绪，无需进一步操作。');
+    if (rawProjectRoot) syncOctoDirToSettings(rawProjectRoot);
     return {
       content: [{ type: 'text', text: lines.join('\n') }],
     };
@@ -636,6 +688,7 @@ export async function handleGetDesignData(
   const transformResult = transformAndSave(json, fetchResult.saveName, octoDir, outputMode);
   if (!isTransformOutput(transformResult)) return transformResult;
 
+  if (rawProjectRoot) syncOctoDirToSettings(rawProjectRoot);
   return {
     content: [{
       type: 'text',
