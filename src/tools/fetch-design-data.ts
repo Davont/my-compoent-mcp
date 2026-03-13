@@ -2,23 +2,22 @@
  * fetch_design_data 工具
  *
  * 从 Octo 平台下载设计稿到本地 .octo/ 目录，支持两种数据源：
- * - fileKey 模式：通过 Octo REST API 拉取原始 Figma JSON（需配置 Token）
+ * - fileKey 模式：通过 getDSL 下载设计稿
  * - shareCode 模式：通过分享口令下载 ZIP 并原样解压到 .octo/（无需 Token）
  *
  * 下载完成后配合 design_to_code 工具完成设计稿转代码。
  */
 
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { existsSync, mkdirSync, writeFileSync, statSync } from 'fs';
+import { existsSync, mkdirSync, statSync } from 'fs';
 import { join, resolve, sep } from 'path';
 import {
   ENV_OCTO_DIR,
-  ENV_OCTO_API_BASE,
-  ENV_OCTO_TOKEN,
   FETCH_DESIGN_TIMEOUT,
 } from '../config.js';
 import { decodeSharePassword, extractTransferZipToDir } from '../utils/octo-transfer.js';
 import { OctoFileInfo, listOctoFiles } from '../utils/octo-files.js';
+import { getDSL } from '../utils/get-dsl.js';
 
 const SAFE_FILENAME_RE = /^[\w-]+$/;
 
@@ -26,18 +25,6 @@ function getOctoDir(): string {
   const envDir = process.env[ENV_OCTO_DIR];
   if (envDir) return envDir;
   return join(process.cwd(), '.octo');
-}
-
-function countNodes(obj: unknown): number {
-  if (!obj || typeof obj !== 'object') return 0;
-  let count = 1;
-  const record = obj as Record<string, unknown>;
-  if (Array.isArray(record.children)) {
-    for (const child of record.children) {
-      count += countNodes(child);
-    }
-  }
-  return count;
 }
 
 function formatBytes(bytes: number): string {
@@ -70,61 +57,6 @@ function formatLocalFileList(octoDir: string, files: OctoFileInfo[]): string {
   return lines.join('\n');
 }
 
-// ============ Octo API 请求 ============
-
-interface OctoFetchOptions {
-  apiBase: string;
-  token: string;
-  fileKey: string;
-  nodeId?: string;
-  timeout: number;
-}
-
-interface OctoFetchResult {
-  json: unknown;
-  rawSize: number;
-  durationMs: number;
-}
-
-async function fetchFromOcto(opts: OctoFetchOptions): Promise<OctoFetchResult> {
-  const { apiBase, token, fileKey, nodeId, timeout } = opts;
-
-  let url = `${apiBase.replace(/\/+$/, '')}/designs/${encodeURIComponent(fileKey)}`;
-  if (nodeId) {
-    url += `?nodeId=${encodeURIComponent(nodeId)}`;
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  const startTime = Date.now();
-
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-      },
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(
-        `Octo API 返回 ${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`
-      );
-    }
-
-    const text = await res.text();
-    const durationMs = Date.now() - startTime;
-    const json = JSON.parse(text);
-
-    return { json, rawSize: text.length, durationMs };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 // ============ 工具定义 ============
 
 export const fetchDesignDataTool: Tool = {
@@ -133,7 +65,7 @@ export const fetchDesignDataTool: Tool = {
     '从 Octo 平台下载设计稿到本地 .octo/ 目录，供 design_to_code 工具使用。\n\n' +
     '传入 input 参数即可，工具自动识别类型：\n' +
     '- 包含 ## 的字符串（如 "##53085E4C##"）→ 分享口令模式，下载 ZIP 并原样解压到 .octo/，无需配置 Token\n' +
-    '- 其他字符串（如 "abc123"）→ fileKey 模式，下载原始 Figma JSON（需配置 OCTO_API_BASE 和 OCTO_TOKEN）\n\n' +
+    '- 其他字符串（如 "9E5B01GS_546"）→ fileKey 模式，通过 getDSL 下载设计稿\n\n' +
     '使用流程：\n' +
     '1. 调用本工具下载设计稿：`fetch_design_data({ input: "##53085E4C##" })`\n' +
     '2. 调用 `design_to_code({ file: "xxx" })` 转换为代码\n\n' +
@@ -144,12 +76,7 @@ export const fetchDesignDataTool: Tool = {
       input: {
         type: 'string',
         description:
-          '设计稿标识，自动识别类型：包含 ## 视为分享口令（如 "##53085E4C##"），否则视为 fileKey。不传则列出本地已有文件。',
-      },
-      nodeId: {
-        type: 'string',
-        description:
-          '指定节点 ID（如 "33:943"），只下载该节点子树。仅 fileKey 模式生效。',
+          '设计稿标识，自动识别类型：包含 ## 视为分享口令（如 "##53085E4C##"），否则视为 fileKey（如 "9E5B01GS_546"）。不传则列出本地已有文件。',
       },
       saveName: {
         type: 'string',
@@ -174,7 +101,6 @@ export async function handleFetchDesignData(
   args: Record<string, unknown>
 ): Promise<CallToolResult> {
   const rawInput = typeof args?.input === 'string' ? args.input.trim() : undefined;
-  const nodeId = typeof args?.nodeId === 'string' ? args.nodeId.trim() : undefined;
   const rawSaveName = typeof args?.saveName === 'string' ? args.saveName.trim() : undefined;
   const timeout = typeof args?.timeout === 'number' && args.timeout > 0
     ? args.timeout
@@ -278,42 +204,10 @@ export async function handleFetchDesignData(
     };
   }
 
-  // ============ fileKey 模式（原有逻辑） ============
+  // ============ fileKey 模式（通过 getDSL 下载） ============
 
   const fileKey = rawInput;
 
-  // 检查环境变量
-  const apiBase = process.env[ENV_OCTO_API_BASE];
-  const token = process.env[ENV_OCTO_TOKEN];
-
-  if (!apiBase) {
-    return {
-      content: [{
-        type: 'text',
-        text:
-          `未配置 Octo API 地址。请设置环境变量：\n` +
-          `  ${ENV_OCTO_API_BASE}=https://your-octo-api.example.com/api/v1\n\n` +
-          `同时需要设置认证 Token：\n` +
-          `  ${ENV_OCTO_TOKEN}=your-token\n\n` +
-          `或者使用 shareCode 模式，无需配置环境变量。`,
-      }],
-      isError: true,
-    };
-  }
-
-  if (!token) {
-    return {
-      content: [{
-        type: 'text',
-        text:
-          `未配置 Octo 认证 Token。请设置环境变量：\n` +
-          `  ${ENV_OCTO_TOKEN}=your-token`,
-      }],
-      isError: true,
-    };
-  }
-
-  // 确定保存文件名
   const saveName = rawSaveName || fileKey.replace(/[^\w-]/g, '_');
   if (!SAFE_FILENAME_RE.test(saveName)) {
     return {
@@ -325,7 +219,6 @@ export async function handleFetchDesignData(
     };
   }
 
-  // 路径安全校验：确保解析后的路径在 .octo/ 目录内
   const targetPath = resolve(octoDir, `${saveName}.json`);
   const resolvedOctoDir = resolve(octoDir);
   if (!targetPath.startsWith(resolvedOctoDir + sep) && targetPath !== resolvedOctoDir) {
@@ -335,7 +228,6 @@ export async function handleFetchDesignData(
     };
   }
 
-  // 检查是否已存在
   if (!overwrite && existsSync(targetPath)) {
     return {
       content: [{
@@ -348,54 +240,22 @@ export async function handleFetchDesignData(
     };
   }
 
-  // 从 Octo API 下载
-  let result: OctoFetchResult;
-  try {
-    result = await fetchFromOcto({ apiBase, token, fileKey, nodeId, timeout });
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      return {
-        content: [{
-          type: 'text',
-          text:
-            `请求超时（${timeout}ms）。可能原因：\n` +
-            `- Octo API 响应慢\n` +
-            `- 设计稿文件过大\n` +
-            `- 网络不稳定\n\n` +
-            `尝试：\n` +
-            `- 增大 timeout 参数\n` +
-            `- 使用 nodeId 只下载指定节点`,
-        }],
-        isError: true,
-      };
-    }
-    const msg = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: 'text', text: `Octo API 请求失败: ${msg}` }],
-      isError: true,
-    };
-  }
-
-  // 确保 .octo/ 目录存在
   if (!existsSync(octoDir)) {
     mkdirSync(octoDir, { recursive: true });
   }
 
-  // 写入文件
+  let text: string;
   try {
-    const jsonStr = JSON.stringify(result.json);
-    writeFileSync(targetPath, jsonStr, 'utf-8');
+    text = await getDSL({ code: fileKey, filePath: targetPath });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return {
-      content: [{ type: 'text', text: `写入文件失败: ${msg}` }],
+      content: [{ type: 'text', text: `设计稿下载失败: ${msg}` }],
       isError: true,
     };
   }
 
-  // 统计信息
-  const nodeCount = countNodes(result.json);
-  const fileSize = formatBytes(result.rawSize);
+  const fileSize = formatBytes(Buffer.byteLength(text, 'utf-8'));
 
   const lines: string[] = [];
   lines.push('# 设计稿下载完成\n');
@@ -403,11 +263,6 @@ export async function handleFetchDesignData(
   lines.push(`|------|------|`);
   lines.push(`| 文件 | \`${saveName}.json\` |`);
   lines.push(`| 大小 | ${fileSize} |`);
-  lines.push(`| 节点数 | ${nodeCount} |`);
-  lines.push(`| 耗时 | ${result.durationMs}ms |`);
-  if (nodeId) {
-    lines.push(`| 节点筛选 | ${nodeId} |`);
-  }
   lines.push('');
   lines.push(`> 下一步：调用 \`design_to_code({ file: "${saveName}" })\` 转换为代码。`);
 
