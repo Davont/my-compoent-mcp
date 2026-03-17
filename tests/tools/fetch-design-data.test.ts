@@ -23,7 +23,7 @@ function getText(result: { content: Array<{ type: string; text?: string }> }): s
   return first.text;
 }
 
-/** 最小 Figma-like JSON 用于 mock */
+/** 最小 Octo 设计稿 JSON 用于 mock */
 const MOCK_DESIGN = {
   type: 'FRAME',
   id: '1:1',

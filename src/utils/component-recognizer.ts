@@ -1,50 +1,50 @@
 /**
- * 从原始 Figma JSON 中识别可能对应组件库组件的节点。
+ * 从原始 Octo 设计稿 JSON 中识别可能对应组件库组件的节点。
  *
  * 直接扫描原始 JSON（不依赖 core.js），
  * 收集 INSTANCE / COMPONENT 节点的 name 并与 doc/index.json 匹配。
  *
  * 支持几种已知的包装结构：
- * - 标准 Figma 节点：{ type: "FRAME", children: [...] }
- * - Figma API 响应：{ document: { children: [...] } }
+ * - 标准设计稿节点：{ type: "FRAME", children: [...] }
+ * - API 响应：{ document: { children: [...] } }
  * - nodes 包装：{ nodes: { "0:1": { document: ... } } } 或 { nodes: [...] }
  * - 顶层数组：[node1, node2, ...]
  */
 
 import { getComponentList, type ComponentIndexEntry } from './doc-reader.js';
 
-interface FigmaNode {
+interface OctoNode {
   type?: string;
   name?: string;
-  children?: FigmaNode[];
+  children?: OctoNode[];
 }
 
 /**
- * 从已知包装结构中提取出真正的 Figma 节点根列表。
+ * 从已知包装结构中提取出真正的设计稿节点根列表。
  * 只处理有限的几种已知格式，不做任意深度泛化穿透。
  */
-export function resolveRoots(json: unknown): FigmaNode[] {
+export function resolveRoots(json: unknown): OctoNode[] {
   if (!json || typeof json !== 'object') return [];
 
   if (Array.isArray(json)) {
-    return json.filter((item): item is FigmaNode => item && typeof item === 'object');
+    return json.filter((item): item is OctoNode => item && typeof item === 'object');
   }
 
   const obj = json as Record<string, unknown>;
 
-  // 标准 Figma 节点（有 type 字段）→ 直接作为根
+  // 标准设计稿节点（有 type 字段）→ 直接作为根
   if (typeof obj.type === 'string') {
-    return [obj as unknown as FigmaNode];
+    return [obj as unknown as OctoNode];
   }
 
-  // Figma API 响应：{ document: { children: [...] } }
+  // API 响应：{ document: { children: [...] } }
   if (obj.document && typeof obj.document === 'object') {
     return resolveRoots(obj.document);
   }
 
   // nodes 对象包装：{ nodes: { "0:1": { document: ... }, ... } }
   if (obj.nodes && typeof obj.nodes === 'object' && !Array.isArray(obj.nodes)) {
-    const roots: FigmaNode[] = [];
+    const roots: OctoNode[] = [];
     for (const value of Object.values(obj.nodes as Record<string, unknown>)) {
       roots.push(...resolveRoots(value));
     }
@@ -59,7 +59,7 @@ export function resolveRoots(json: unknown): FigmaNode[] {
   // 有 children 但没有 type（某些中间容器）
   if (Array.isArray(obj.children)) {
     return (obj.children as unknown[]).filter(
-      (item): item is FigmaNode => !!item && typeof item === 'object',
+      (item): item is OctoNode => !!item && typeof item === 'object',
     );
   }
 
@@ -82,7 +82,7 @@ export function extractRecommendedComponents(json: unknown): string[] {
 
   const nodeTokens = new Set<string>();
   for (const root of roots) {
-    walkFigmaTree(root, (node) => {
+    walkOctoTree(root, (node) => {
       if (node.type !== 'INSTANCE' && node.type !== 'COMPONENT') return;
       const name = node.name || '';
       nodeTokens.add(name.toLowerCase());
@@ -106,9 +106,9 @@ export function extractRecommendedComponents(json: unknown): string[] {
   return Array.from(matched);
 }
 
-function walkFigmaTree(node: FigmaNode, cb: (n: FigmaNode) => void): void {
+function walkOctoTree(node: OctoNode, cb: (n: OctoNode) => void): void {
   cb(node);
   if (node.children) {
-    for (const child of node.children) walkFigmaTree(child, cb);
+    for (const child of node.children) walkOctoTree(child, cb);
   }
 }

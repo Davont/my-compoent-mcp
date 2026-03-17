@@ -8,7 +8,7 @@ import { DEFAULT_OUTPUT_MODE } from '../../src/config';
 const OCTO_DIR = join(process.cwd(), '.octo');
 const TEST_FILE_HOME = '__test_home__';
 const TEST_FILE_DETAIL = '__test_detail__';
-const TEST_FILE_FIGMA = '__test_figma__';
+const TEST_FILE_OCTO = '__test_octo__';
 const TEST_JSON = { nodes: [{ type: 'Frame', name: 'Home', children: [] }] };
 
 /** 从 handleDesignToCode 输出文本中提取 ```json ... ``` 代码块并解析 */
@@ -19,8 +19,8 @@ function extractDslJson(text: string): Record<string, unknown> | null {
 }
 
 
-/** 最小可处理的 Figma JSON（能通过 processDesign 布局引擎） */
-const MINIMAL_FIGMA_JSON = {
+/** 最小可处理的 Octo 设计稿 JSON（能通过 designToCode 布局引擎） */
+const MINIMAL_OCTO_JSON = {
   type: 'FRAME',
   id: 'test:1',
   name: '测试页面',
@@ -112,14 +112,14 @@ beforeAll(() => {
   }
   writeFileSync(join(OCTO_DIR, `${TEST_FILE_HOME}.json`), JSON.stringify(TEST_JSON));
   writeFileSync(join(OCTO_DIR, `${TEST_FILE_DETAIL}.json`), JSON.stringify({ nodes: [] }));
-  writeFileSync(join(OCTO_DIR, `${TEST_FILE_FIGMA}.json`), JSON.stringify(MINIMAL_FIGMA_JSON));
+  writeFileSync(join(OCTO_DIR, `${TEST_FILE_OCTO}.json`), JSON.stringify(MINIMAL_OCTO_JSON));
 });
 
 afterAll(() => {
   for (const name of [
     `${TEST_FILE_HOME}.json`,
     `${TEST_FILE_DETAIL}.json`,
-    `${TEST_FILE_FIGMA}.json`,
+    `${TEST_FILE_OCTO}.json`,
   ]) {
     try {
       const filePath = join(OCTO_DIR, name);
@@ -219,8 +219,8 @@ describe('transform 函数接口', () => {
 // ============ 布局引擎集成 ============
 
 describe('transform 布局引擎集成', () => {
-  it('有效 Figma JSON 的 dsl 模式返回精简 DSL（带 w/h）', () => {
-    const result = transform(MINIMAL_FIGMA_JSON, 'dsl');
+  it('有效 Octo JSON 的 dsl 模式返回精简 DSL（带 w/h）', () => {
+    const result = transform(MINIMAL_OCTO_JSON, 'dsl');
     expect(result.mode).toBe('dsl');
     const parsed = JSON.parse(result.content);
     expect(typeof parsed.id).toBe('number');
@@ -229,13 +229,13 @@ describe('transform 布局引擎集成', () => {
   });
 
   it('精简 DSL 的 TEXT 节点包含 text 字段', () => {
-    const result = transform(MINIMAL_FIGMA_JSON, 'dsl');
+    const result = transform(MINIMAL_OCTO_JSON, 'dsl');
     const content = result.content;
     expect(content).toContain('"text"');
   });
 
-  it('有效 Figma JSON 的 html 模式返回 JSX 格式', () => {
-    const result = transform(MINIMAL_FIGMA_JSON, 'html');
+  it('有效 Octo JSON 的 html 模式返回 JSX 格式', () => {
+    const result = transform(MINIMAL_OCTO_JSON, 'html');
     expect(result.mode).toBe('html');
     expect(result.jsx).toBeDefined();
     expect(result.jsx).toContain('className=');
@@ -245,7 +245,7 @@ describe('transform 布局引擎集成', () => {
   });
 
   it('HTML 模式拆分出独立 CSS 和 JSX', () => {
-    const result = transform(MINIMAL_FIGMA_JSON, 'html');
+    const result = transform(MINIMAL_OCTO_JSON, 'html');
     expect(result.css).toBeDefined();
     expect(result.jsx).toBeDefined();
     expect(result.css).toContain('layout-node');
@@ -256,7 +256,7 @@ describe('transform 布局引擎集成', () => {
   });
 
   it('识别出 INSTANCE 节点中的组件名', () => {
-    const result = transform(MINIMAL_FIGMA_JSON, 'dsl');
+    const result = transform(MINIMAL_OCTO_JSON, 'dsl');
     expect(result.recommendedComponents).toBeDefined();
     expect(result.recommendedComponents!).toContain('Button');
   });
@@ -298,8 +298,8 @@ describe('design_to_code 联动组件规范', () => {
     expect(first.text).not.toContain('全部上下文');
   });
 
-  it('真实 Figma JSON 识别到 Button 时自动联动组件规范', async () => {
-    const result = await handleDesignToCode({ file: TEST_FILE_FIGMA, outputMode: 'dsl' });
+  it('真实 Octo JSON 识别到 Button 时自动联动组件规范', async () => {
+    const result = await handleDesignToCode({ file: TEST_FILE_OCTO, outputMode: 'dsl' });
     expect(result.isError).toBeUndefined();
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');

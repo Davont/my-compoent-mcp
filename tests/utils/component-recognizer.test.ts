@@ -4,7 +4,7 @@ import { resolveRoots, extractRecommendedComponents } from '../../src/utils/comp
 // ============ resolveRoots ============
 
 describe('resolveRoots', () => {
-  it('标准 Figma 节点（有 type）→ 直接作为根', () => {
+  it('标准 Octo 节点（有 type）→ 直接作为根', () => {
     const node = { type: 'FRAME', name: 'Page', children: [] };
     expect(resolveRoots(node)).toEqual([node]);
   });
@@ -17,7 +17,7 @@ describe('resolveRoots', () => {
     expect(resolveRoots(nodes)).toEqual(nodes);
   });
 
-  it('Figma API 响应 { document: { children: [...] } }', () => {
+  it('API 响应 { document: { children: [...] } }', () => {
     const child1 = { type: 'FRAME', name: 'Page1', children: [] };
     const child2 = { type: 'FRAME', name: 'Page2', children: [] };
     const apiResponse = { document: { children: [child1, child2] } };
@@ -59,7 +59,7 @@ describe('resolveRoots', () => {
 // ============ extractRecommendedComponents 包装层穿透 ============
 
 describe('extractRecommendedComponents 包装层穿透', () => {
-  it('标准 Figma 节点能识别 INSTANCE', () => {
+  it('标准 Octo 节点能识别 INSTANCE', () => {
     const json = {
       type: 'FRAME',
       name: 'Page',
@@ -71,7 +71,7 @@ describe('extractRecommendedComponents 包装层穿透', () => {
     expect(result).toContain('Button');
   });
 
-  it('{ nodes: [figmaRoot] } 包装也能识别', () => {
+  it('{ nodes: [octoRoot] } 包装也能识别', () => {
     const json = {
       nodes: [{
         type: 'FRAME',

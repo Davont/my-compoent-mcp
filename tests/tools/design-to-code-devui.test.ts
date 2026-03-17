@@ -8,10 +8,10 @@ import { formatDevUIOutput } from '../../src/tools/format-devui';
 
 const OCTO_DIR = join(process.cwd(), '.octo');
 const TEST_FILE = '__test_devui__';
-const TEST_FILE_FIGMA = '__test_devui_figma__';
+const TEST_FILE_OCTO = '__test_devui_octo__';
 const TEST_JSON = { nodes: [{ type: 'Frame', name: 'Home', children: [] }] };
 
-const MINIMAL_FIGMA_JSON = {
+const MINIMAL_OCTO_JSON = {
   type: 'FRAME',
   id: 'test:1',
   name: '测试页面',
@@ -97,11 +97,11 @@ beforeAll(() => {
     mkdirSync(OCTO_DIR, { recursive: true });
   }
   writeFileSync(join(OCTO_DIR, `${TEST_FILE}.json`), JSON.stringify(TEST_JSON));
-  writeFileSync(join(OCTO_DIR, `${TEST_FILE_FIGMA}.json`), JSON.stringify(MINIMAL_FIGMA_JSON));
+  writeFileSync(join(OCTO_DIR, `${TEST_FILE_OCTO}.json`), JSON.stringify(MINIMAL_OCTO_JSON));
 });
 
 afterAll(() => {
-  for (const name of [`${TEST_FILE}.json`, `${TEST_FILE_FIGMA}.json`]) {
+  for (const name of [`${TEST_FILE}.json`, `${TEST_FILE_OCTO}.json`]) {
     try {
       const filePath = join(OCTO_DIR, name);
       if (existsSync(filePath)) rmSync(filePath);
@@ -139,7 +139,7 @@ describe('design_to_code devUI 模式', () => {
   });
 
   it('devUI 输出使用 class 而非 className', async () => {
-    const result = await handleDesignToCode({ file: TEST_FILE_FIGMA, outputMode: 'devUI' });
+    const result = await handleDesignToCode({ file: TEST_FILE_OCTO, outputMode: 'devUI' });
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
     const vueBlock = first.text.match(/```vue\n([\s\S]*?)\n```/);
@@ -172,8 +172,8 @@ describe('design_to_code devUI 模式', () => {
 // ============ 组件识别联动 ============
 
 describe('design_to_code devUI 组件识别', () => {
-  it('有效 Figma JSON 识别到 Button 时输出包含组件信息', async () => {
-    const result = await handleDesignToCode({ file: TEST_FILE_FIGMA, outputMode: 'devUI' });
+  it('有效 Octo JSON 识别到 Button 时输出包含组件信息', async () => {
+    const result = await handleDesignToCode({ file: TEST_FILE_OCTO, outputMode: 'devUI' });
     expect(result.isError).toBeUndefined();
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
@@ -190,7 +190,7 @@ describe('design_to_code devUI 组件识别', () => {
   });
 
   it('有推荐组件时提示组件已包含并禁止修改', async () => {
-    const result = await handleDesignToCode({ file: TEST_FILE_FIGMA, outputMode: 'devUI' });
+    const result = await handleDesignToCode({ file: TEST_FILE_OCTO, outputMode: 'devUI' });
     const first = result.content[0];
     if (first.type !== 'text') throw new Error('expected text content');
     expect(first.text).toContain('已包含在 Page.vue');
@@ -215,8 +215,8 @@ describe('transformDevUI 函数', () => {
     expect(result.vue).toContain('<style scoped>');
   });
 
-  it('有效 Figma JSON 返回带布局的 Vue SFC', () => {
-    const result = transformDevUI(MINIMAL_FIGMA_JSON);
+  it('有效 Octo JSON 返回带布局的 Vue SFC', () => {
+    const result = transformDevUI(MINIMAL_OCTO_JSON);
     expect(result.vue).toContain('<template>');
     expect(result.vue).toContain('class=');
     expect(result.vue).not.toContain('className=');
@@ -224,8 +224,8 @@ describe('transformDevUI 函数', () => {
     expect(result.vue).toContain('layout-node');
   });
 
-  it('有效 Figma JSON 识别出 Button', () => {
-    const result = transformDevUI(MINIMAL_FIGMA_JSON);
+  it('有效 Octo JSON 识别出 Button', () => {
+    const result = transformDevUI(MINIMAL_OCTO_JSON);
     expect(result.recommendedComponents).toContain('Button');
   });
 

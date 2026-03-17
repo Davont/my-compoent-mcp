@@ -1,7 +1,7 @@
 /**
  * 设计稿 JSON → 精简 DSL / HTML 转换
  *
- * 通过 octo/core.js 的 designToCode 统一入口将 Figma 导出 JSON 转换为
+ * 通过 octo/core.js 的 designToCode 统一入口将 Octo 设计稿 JSON 转换为
  * 精简 DSL（token 友好）或语义化 HTML + CSS。
  *
  * 接口约定：
