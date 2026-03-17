@@ -1,3 +1,890 @@
+function getTextBaselineInfo(node) {
+	if (node.type !== "TEXT") return void 0;
+	const baselines = node.textData?.baselines;
+	if (!Array.isArray(baselines) || baselines.length === 0) return void 0;
+	let maxWidth = -Infinity;
+	let offsetX = 0;
+	for (const b of baselines) {
+		const width = b?.width;
+		if (typeof width === "number" && width > maxWidth) {
+			maxWidth = width;
+			const posX = b?.position?.x;
+			offsetX = typeof posX === "number" ? posX : 0;
+		}
+	}
+	if (maxWidth > 0) return {
+		width: maxWidth,
+		offsetX
+	};
+}
+function hasVisualStylesForSpacing(node) {
+	if (node.type === "TEXT") return false;
+	if (node.styles?.background || node.styles?.border || node.styles?.borderRadius) return true;
+	if (Array.isArray(node.fills) && node.fills.length > 0) return true;
+	if (Array.isArray(node.strokes) && node.strokes.length > 0) return true;
+	if (node.cornerRadius !== void 0 || node.borderRadius !== void 0) return true;
+	return false;
+}
+function getEffectiveBounds(node) {
+	if (node.children && node.children.length > 0 && !hasVisualStylesForSpacing(node)) {
+		let minX = Infinity, minY = Infinity;
+		let maxX = -Infinity, maxY = -Infinity;
+		for (const child of node.children) {
+			const b = getEffectiveBounds(child);
+			minX = Math.min(minX, b.x);
+			minY = Math.min(minY, b.y);
+			maxX = Math.max(maxX, b.x + b.width);
+			maxY = Math.max(maxY, b.y + b.height);
+		}
+		if (minX !== Infinity && minY !== Infinity && maxX !== -Infinity && maxY !== -Infinity) return {
+			x: minX,
+			y: minY,
+			width: maxX - minX,
+			height: maxY - minY
+		};
+	}
+	const baselineInfo = getTextBaselineInfo(node);
+	if (baselineInfo) return {
+		x: node.x + baselineInfo.offsetX,
+		y: node.y,
+		width: baselineInfo.width,
+		height: node.height
+	};
+	return {
+		x: node.x,
+		y: node.y,
+		width: node.width,
+		height: node.height
+	};
+}
+function analyzeChildSpacing(parent, sortedChildren, isRow) {
+	const result = {
+		useGap: false,
+		gap: 0,
+		padding: {
+			top: 0,
+			right: 0,
+			bottom: 0,
+			left: 0
+		}
+	};
+	if (sortedChildren.length === 0) return result;
+	const parentBounds = getEffectiveBounds(parent);
+	let minTop = Infinity, minLeft = Infinity, minRight = Infinity, minBottom = Infinity;
+	for (const child of sortedChildren) {
+		const bounds = getEffectiveBounds(child);
+		minTop = Math.min(minTop, bounds.y - parentBounds.y);
+		minLeft = Math.min(minLeft, bounds.x - parentBounds.x);
+		minRight = Math.min(minRight, parentBounds.x + parentBounds.width - (bounds.x + bounds.width));
+		minBottom = Math.min(minBottom, parentBounds.y + parentBounds.height - (bounds.y + bounds.height));
+	}
+	result.padding.top = Math.max(0, minTop);
+	result.padding.left = Math.max(0, minLeft);
+	result.padding.right = Math.max(0, minRight);
+	result.padding.bottom = Math.max(0, minBottom);
+	if (sortedChildren.length < 2) {
+		result.useGap = true;
+		result.gap = 0;
+		return result;
+	}
+	const gaps = [];
+	for (let i = 1; i < sortedChildren.length; i++) {
+		const prev = getEffectiveBounds(sortedChildren[i - 1]);
+		const curr = getEffectiveBounds(sortedChildren[i]);
+		if (isRow) gaps.push(Math.max(0, curr.x - (prev.x + prev.width)));
+		else gaps.push(Math.max(0, curr.y - (prev.y + prev.height)));
+	}
+	const minGap = Math.min(...gaps);
+	const maxGap = Math.max(...gaps);
+	if (maxGap - minGap <= 2) {
+		result.useGap = true;
+		result.gap = Math.round((minGap + maxGap) / 2);
+	}
+	return result;
+}
+function calcChildMargins(child, parent, prevChild, isRow, parentUsesGap, parentGap, parentPadding, alignItems) {
+	const result = {
+		marginTop: 0,
+		marginLeft: 0
+	};
+	const parentBounds = getEffectiveBounds(parent);
+	const currBounds = getEffectiveBounds(child);
+	if (isRow) {
+		if (prevChild) {
+			const prevBounds = getEffectiveBounds(prevChild);
+			const prevRight = prevBounds.x + prevBounds.width;
+			let actualGap = currBounds.x - prevRight;
+			if (actualGap < 0 && actualGap >= -2) actualGap = 0;
+			if (!parentUsesGap) result.marginLeft = actualGap;
+			else if (Math.abs(actualGap - parentGap) > 2) result.marginLeft = actualGap - parentGap;
+		}
+		const contentTop = parentBounds.y + parentPadding.top;
+		const contentBottom = parentBounds.y + parentBounds.height - parentPadding.bottom;
+		const contentHeight = Math.max(0, contentBottom - contentTop);
+		const childHeight = currBounds.height;
+		const align = alignItems || "flex-start";
+		let expectedTop = contentTop;
+		if (align === "center") expectedTop = contentTop + (contentHeight - childHeight) / 2;
+		else if (align === "flex-end") expectedTop = contentBottom - childHeight;
+		const delta = currBounds.y - expectedTop;
+		if (Math.abs(delta) > 1) result.marginTop = delta;
+	} else {
+		if (prevChild) {
+			const prevBounds = getEffectiveBounds(prevChild);
+			const prevBottom = prevBounds.y + prevBounds.height;
+			let actualGap = currBounds.y - prevBottom;
+			if (actualGap < 0 && actualGap >= -2) actualGap = 0;
+			if (!parentUsesGap) result.marginTop = actualGap;
+			else if (Math.abs(actualGap - parentGap) > 2) result.marginTop = actualGap - parentGap;
+		}
+		const contentLeft = parentBounds.x + parentPadding.left;
+		const contentRight = parentBounds.x + parentBounds.width - parentPadding.right;
+		const contentWidth = Math.max(0, contentRight - contentLeft);
+		const childWidth = currBounds.width;
+		const align = alignItems || "flex-start";
+		let expectedLeft = contentLeft;
+		if (align === "center") expectedLeft = contentLeft + (contentWidth - childWidth) / 2;
+		else if (align === "flex-end") expectedLeft = contentRight - childWidth;
+		const delta = currBounds.x - expectedLeft;
+		if (Math.abs(delta) > 1) result.marginLeft = delta;
+	}
+	return result;
+}
+function computeFingerprint(styles) {
+	if (styles.length === 0) return "";
+	const str = [...styles].sort().join("|");
+	let hash = 0;
+	for (let i = 0; i < str.length; i++) {
+		const char = str.charCodeAt(i);
+		hash = (hash << 5) - hash + char;
+		hash = hash & hash;
+	}
+	return Math.abs(hash).toString(16).padStart(8, "0");
+}
+function generateSharedClassName(fingerprint, _index) {
+	return `s-${fingerprint.slice(0, 6)}`;
+}
+function deduplicateStyles(entries, minSharedCount = 2) {
+	const sharedClasses = [];
+	const nodeClassMap = /* @__PURE__ */ new Map();
+	const uniqueStyles = /* @__PURE__ */ new Map();
+	const groups = /* @__PURE__ */ new Map();
+	for (const entry of entries) {
+		if (!entry.fingerprint) continue;
+		const group = groups.get(entry.fingerprint) || [];
+		group.push(entry);
+		groups.set(entry.fingerprint, group);
+	}
+	const usedClassNames = /* @__PURE__ */ new Set();
+	for (const [fingerprint, group] of groups) if (group.length >= minSharedCount) {
+		let className = generateSharedClassName(fingerprint, sharedClasses.length);
+		while (usedClassNames.has(className)) className = `${className}-${sharedClasses.length}`;
+		usedClassNames.add(className);
+		sharedClasses.push({
+			className,
+			styles: group[0].styles,
+			nodeIds: group.map((e) => e.nodeId)
+		});
+		for (const entry of group) nodeClassMap.set(entry.nodeId, [className]);
+	} else for (const entry of group) {
+		nodeClassMap.set(entry.nodeId, [entry.nodeClass]);
+		uniqueStyles.set(entry.nodeId, entry.styles);
+	}
+	return {
+		sharedClasses,
+		nodeClassMap,
+		uniqueStyles
+	};
+}
+function generateSharedCss(sharedClasses) {
+	if (sharedClasses.length === 0) return "";
+	return `/* 共享样式类 */\n${sharedClasses.map((sc) => {
+		const body = sc.styles.map((s) => `  ${s};`).join("\n");
+		return `.${sc.className} {\n${body}\n}`;
+	}).join("\n\n")}`;
+}
+function createStyleEntry(nodeId, nodeClass, styles) {
+	return {
+		nodeId,
+		nodeClass,
+		styles,
+		fingerprint: computeFingerprint(styles)
+	};
+}
+var NAME_TAG_RULES = [
+	{
+		exact: [
+			"button",
+			"btn",
+			"按钮"
+		],
+		contains: ["button", "btn"],
+		tag: "button",
+		extraClass: "btn"
+	},
+	{
+		exact: ["card", "卡片"],
+		startsWith: ["卡片"],
+		tag: "article",
+		extraClass: "card"
+	},
+	{
+		exact: [
+			"link",
+			"链接",
+			"常用链接"
+		],
+		tag: "a",
+		extraClass: "link"
+	}
+];
+function inferTagFromName(name) {
+	if (!name) return null;
+	const lowerName = name.toLowerCase().trim();
+	for (const rule of NAME_TAG_RULES) {
+		if (rule.exact) {
+			for (const keyword of rule.exact) if (lowerName === keyword.toLowerCase()) return {
+				tag: rule.tag,
+				role: rule.role,
+				extraClass: rule.extraClass
+			};
+		}
+		if (rule.startsWith) {
+			for (const keyword of rule.startsWith) if (lowerName.startsWith(keyword.toLowerCase())) return {
+				tag: rule.tag,
+				role: rule.role,
+				extraClass: rule.extraClass
+			};
+		}
+		if (rule.contains) {
+			for (const keyword of rule.contains) if (keyword.match(/^[a-z]+$/i)) {
+				if (new RegExp(`(^|[^a-z])${keyword}([^a-z]|$)`, "i").test(lowerName)) return {
+					tag: rule.tag,
+					role: rule.role,
+					extraClass: rule.extraClass
+				};
+			}
+		}
+	}
+	return null;
+}
+function inferTagFromType(node) {
+	switch (node.type) {
+		case "TEXT": return {
+			tag: "span",
+			extraClass: "text"
+		};
+		case "ICON": return {
+			tag: "span",
+			extraClass: "icon",
+			role: "img"
+		};
+		case "IMAGE": return {
+			tag: "img",
+			role: "img"
+		};
+		case "VECTOR": return {
+			tag: "span",
+			extraClass: "vector",
+			role: "img"
+		};
+		case "INSTANCE":
+		case "VIRTUAL_GROUP":
+		case "FRAME":
+		case "GROUP":
+		default: return { tag: "div" };
+	}
+}
+function inferTag(node) {
+	const nameInference = inferTagFromName(node.name);
+	if (nameInference) return nameInference;
+	return inferTagFromType(node);
+}
+function isSelfClosingTag(tag) {
+	return [
+		"img",
+		"input",
+		"br",
+		"hr",
+		"meta",
+		"link"
+	].includes(tag);
+}
+function removeRedundantNesting(node) {
+	if (node.children && node.children.length > 0) node = {
+		...node,
+		children: node.children.map((child) => removeRedundantNesting(child))
+	};
+	if (node.children && node.children.length === 1 && node.children[0].children && node.children[0].children.length > 0) {
+		const child = node.children[0];
+		const sameSize = Math.abs(node.width - child.width) < 2 && Math.abs(node.height - child.height) < 2;
+		const isVirtualGroup = child.type === "VIRTUAL_GROUP";
+		if (sameSize && isVirtualGroup) return {
+			...node,
+			layout: child.layout || node.layout,
+			children: child.children
+		};
+	}
+	return node;
+}
+function escapeHtml(input) {
+	return input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function sanitizeClassName(value) {
+	return value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function nodeIdToClass(nodeId) {
+	return `id-${nodeId.replace(/[^a-zA-Z0-9]/g, "-")}`;
+}
+function buildClassNames(node, classMode, debugMode = false) {
+	const hasChildren = node.children && node.children.length > 0;
+	const classes = [];
+	if (debugMode) {
+		classes.push("layout-node", hasChildren ? "is-container" : "is-leaf", `type-${node.type.toLowerCase()}`);
+		if (node.id) classes.push(nodeIdToClass(node.id));
+	} else {
+		classes.push("layout-node");
+		const hasExplicitVisualStyles = !!(node.styles?.background || node.styles?.border || node.styles?.borderRadius);
+		if (node.mask !== true && !hasExplicitVisualStyles) {
+			if (node.type === "IMAGE") classes.push("type-image");
+			else if (node.type === "ICON") classes.push("type-icon");
+			else if (node.type === "VECTOR") classes.push("type-vector");
+		}
+	}
+	if (classMode === "tailwind") {
+		if (node.layout?.display === "flex") {
+			const direction = node.layout.flexDirection === "row" || !node.layout.flexDirection ? "row" : "col";
+			const alignItems = node.layout.alignItems || "flex-start";
+			let alignSuffix = "start";
+			if (alignItems === "center") alignSuffix = "center";
+			else if (alignItems === "flex-end") alignSuffix = "end";
+			classes.push(`flex-${direction}-${alignSuffix}`);
+			const justify = node.layout.justifyContent;
+			if (justify === "center") classes.push("justify-center");
+			else if (justify === "flex-end") classes.push("justify-end");
+			else if (justify === "space-between") classes.push("justify-between");
+		}
+	} else classes.push("layout-box");
+	return classes;
+}
+function shouldUseSpaceBetween(node, spacingAnalysis) {
+	if (!spacingAnalysis || !node.children || node.children.length !== 2) return false;
+	if (!(node.layout?.flexDirection === "row" || !node.layout?.flexDirection)) return false;
+	if (!spacingAnalysis.useGap || spacingAnalysis.gap <= 0) return false;
+	const justify = node.layout?.justifyContent;
+	if (justify && justify !== "flex-start") return false;
+	const parentWidth = typeof node.width === "number" ? node.width : 0;
+	if (parentWidth <= 0) return false;
+	const { left, right } = spacingAnalysis.padding;
+	if (left > 1 || right > 1) return false;
+	const sorted = [...node.children].sort((a, b) => a.x - b.x);
+	const leftWidth = getEffectiveBounds(sorted[0]).width;
+	const rightWidth = getEffectiveBounds(sorted[1]).width;
+	const expectedGap = parentWidth - left - right - leftWidth - rightWidth;
+	return Math.abs(expectedGap - spacingAnalysis.gap) <= 2;
+}
+function collectStyleParts(node, isRoot, spacingAnalysis, parentCtx) {
+	const parts = [];
+	const isLeaf = !node.children || node.children.length === 0;
+	const isGraphic = [
+		"IMAGE",
+		"ICON",
+		"RECTANGLE",
+		"ELLIPSE",
+		"LINE",
+		"POLYGON",
+		"STAR",
+		"VECTOR",
+		"PATH"
+	].includes(node.type);
+	const isText = node.type === "TEXT";
+	const hasVisualStyles = !!(node.styles?.background || node.styles?.border || node.styles?.borderRadius);
+	const addDimensions = () => {
+		if (typeof node.width === "number" && node.width > 0) parts.push(`width: ${node.width}px`);
+		if (typeof node.height === "number" && node.height > 0) parts.push(`height: ${node.height}px`);
+	};
+	if (isRoot) addDimensions();
+	else if (isGraphic) addDimensions();
+	else if (isText) {
+		const baselines = node.textData?.baselines;
+		const baselineCount = Array.isArray(baselines) ? baselines.length : 0;
+		const hasBaselineInfo = baselineCount > 0;
+		const isMultiLineByBaseline = hasBaselineInfo && baselineCount > 1;
+		let isMultiLineByHeight = false;
+		if (!hasBaselineInfo) {
+			const singleLineHeight = parseFloat(node.styles?.fontSize || "14px") * parseFloat(node.styles?.lineHeight || "1.5");
+			isMultiLineByHeight = !!(node.height && node.height > singleLineHeight + 1);
+		}
+		if (isMultiLineByBaseline || isMultiLineByHeight) {
+			if (typeof node.width === "number" && node.width > 0) parts.push(`width: ${node.width}px`);
+		}
+	} else if (isLeaf) addDimensions();
+	else if (hasVisualStyles) addDimensions();
+	const layoutGap = node.layout?.gap;
+	const hasLayoutGap = typeof layoutGap === "number" && layoutGap > 0;
+	const hasLayoutPadding = typeof node.layout?.paddingTop === "number" || typeof node.layout?.paddingRight === "number" || typeof node.layout?.paddingBottom === "number" || typeof node.layout?.paddingLeft === "number";
+	if (hasLayoutGap || hasLayoutPadding) {
+		if (hasLayoutGap) parts.push(`gap: ${layoutGap}px`);
+		const pt = node.layout?.paddingTop ?? 0;
+		const pr = node.layout?.paddingRight ?? 0;
+		const pb = node.layout?.paddingBottom ?? 0;
+		const pl = node.layout?.paddingLeft ?? 0;
+		const padParts = [
+			pt > 0 ? `${pt}px` : "0",
+			pr > 0 ? `${pr}px` : "0",
+			pb > 0 ? `${pb}px` : "0",
+			pl > 0 ? `${pl}px` : "0"
+		];
+		if (padParts.some((p) => p !== "0")) parts.push(`padding: ${padParts.join(" ")}`);
+	} else if (spacingAnalysis) {
+		const { useGap, gap, padding } = spacingAnalysis;
+		const useSpaceBetween = shouldUseSpaceBetween(node, spacingAnalysis);
+		const gapRound = Math.round(gap);
+		if (useSpaceBetween) {
+			if (!parts.some((p) => p.startsWith("width:")) && typeof node.width === "number" && node.width > 0) parts.push(`width: ${node.width}px`);
+			parts.push("justify-content: space-between");
+		} else if (useGap && gapRound > 0) parts.push(`gap: ${gapRound}px`);
+		const padParts = [];
+		const pt = Math.round(padding.top);
+		const pr = Math.round(padding.right);
+		const pb = Math.round(padding.bottom);
+		const pl = Math.round(padding.left);
+		if (pt > 0) padParts.push(`${pt}px`);
+		else padParts.push("0");
+		if (pr > 0) padParts.push(`${pr}px`);
+		else padParts.push("0");
+		if (pb > 0) padParts.push(`${pb}px`);
+		else padParts.push("0");
+		if (pl > 0) padParts.push(`${pl}px`);
+		else padParts.push("0");
+		if (padParts.some((p) => p !== "0")) parts.push(`padding: ${padParts.join(" ")}`);
+	}
+	if (parentCtx) {
+		const hasLayoutMarginTop = typeof node.layout?.marginTop === "number";
+		const hasLayoutMarginLeft = typeof node.layout?.marginLeft === "number";
+		let mt = hasLayoutMarginTop ? Math.round(node.layout.marginTop) : 0;
+		let ml = hasLayoutMarginLeft ? Math.round(node.layout.marginLeft) : 0;
+		if (!hasLayoutMarginTop || !hasLayoutMarginLeft) {
+			const pUseGap = typeof parentCtx.parent.layout?.gap === "number" && parentCtx.parent.layout.gap > 0 || (parentCtx.useGap ?? false);
+			const pGap = typeof parentCtx.parent.layout?.gap === "number" ? parentCtx.parent.layout.gap : parentCtx.gap ?? 0;
+			const pPadding = {
+				top: parentCtx.parent.layout?.paddingTop ?? parentCtx.padding?.top ?? 0,
+				right: parentCtx.parent.layout?.paddingRight ?? parentCtx.padding?.right ?? 0,
+				bottom: parentCtx.parent.layout?.paddingBottom ?? parentCtx.padding?.bottom ?? 0,
+				left: parentCtx.parent.layout?.paddingLeft ?? parentCtx.padding?.left ?? 0
+			};
+			const margins = calcChildMargins(node, parentCtx.parent, parentCtx.prevSibling, parentCtx.isRow, pUseGap, pGap, pPadding, parentCtx.alignItems);
+			if (!hasLayoutMarginTop) mt = Math.round(margins.marginTop);
+			if (!hasLayoutMarginLeft) ml = Math.round(margins.marginLeft);
+		}
+		if (mt !== 0) parts.push(`margin-top: ${mt}px`);
+		if (ml !== 0) parts.push(`margin-left: ${ml}px`);
+	}
+	if (node.styles) {
+		for (const [key, value] of Object.entries(node.styles)) if (value !== void 0 && value !== null) {
+			const cssKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
+			parts.push(`${cssKey}: ${value}`);
+		}
+	}
+	return parts;
+}
+function collectAllStyles(node, isRoot, path, parentCtx, entries, contexts) {
+	const hasChildren = node.children && node.children.length > 0;
+	const nodeId = node.id || `node-${path}`;
+	const nodeClass = `n-${sanitizeClassName(nodeId)}`;
+	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
+	const sortedChildren = hasChildren ? [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y) : [];
+	const spacingAnalysis = hasChildren ? analyzeChildSpacing(node, sortedChildren, isRow) : void 0;
+	const styles = collectStyleParts(node, isRoot, spacingAnalysis, parentCtx);
+	entries.push(createStyleEntry(nodeId, nodeClass, styles));
+	contexts.push({
+		node,
+		nodeId,
+		nodeClass,
+		isRoot,
+		spacingAnalysis,
+		parentCtx,
+		path
+	});
+	if (hasChildren) {
+		const childCtxBase = {
+			parent: node,
+			useGap: spacingAnalysis?.useGap ?? false,
+			gap: spacingAnalysis?.gap ?? 0,
+			padding: {
+				top: spacingAnalysis?.padding?.top ?? 0,
+				right: spacingAnalysis?.padding?.right ?? 0,
+				bottom: spacingAnalysis?.padding?.bottom ?? 0,
+				left: spacingAnalysis?.padding?.left ?? 0
+			},
+			isRow,
+			alignItems: node.layout?.alignItems
+		};
+		sortedChildren.forEach((child, index) => {
+			const prev = index > 0 ? sortedChildren[index - 1] : null;
+			const childCtx = {
+				...childCtxBase,
+				prevSibling: prev
+			};
+			collectAllStyles(child, false, `${path}-${index}`, childCtx, entries, contexts);
+		});
+	}
+}
+function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode, dedupResult, path, _parentCtx, semanticTags = true, includeNodeId = true, includeNodeName = false) {
+	const hasChildren = node.children && node.children.length > 0;
+	const nodeId = node.id || `node-${path}`;
+	const tagInfo = semanticTags ? inferTag(node) : { tag: "div" };
+	const tag = tagInfo.tag;
+	const baseClasses = buildClassNames(node, classMode, debugMode);
+	if (tagInfo.extraClass) baseClasses.push(tagInfo.extraClass);
+	const allClasses = [...dedupResult.nodeClassMap.get(nodeId) || [], ...baseClasses].join(" ");
+	const label = includeLabels ? `<span class="layout-label">${escapeHtml(node.name || node.type)}</span>` : "";
+	let content = "";
+	if (node.characters) content = escapeHtml(node.characters);
+	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
+	const dataNodeId = includeNodeId && nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
+	const dataName = includeNodeName && node.name ? ` data-name="${escapeHtml(node.name)}"` : "";
+	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
+	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
+	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses}"${dataNodeId}${dataName}${dataType}${roleAttr}${altAttr} />`;
+	if (!hasChildren) return `<${tag} class="${allClasses}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${content}</${tag}>`;
+	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
+	const sortedChildren = [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y);
+	const spacingAnalysis = analyzeChildSpacing(node, sortedChildren, isRow);
+	const childCtxBase = {
+		parent: node,
+		useGap: spacingAnalysis?.useGap ?? false,
+		gap: spacingAnalysis?.gap ?? 0,
+		padding: {
+			top: spacingAnalysis?.padding?.top ?? 0,
+			right: spacingAnalysis?.padding?.right ?? 0,
+			bottom: spacingAnalysis?.padding?.bottom ?? 0,
+			left: spacingAnalysis?.padding?.left ?? 0
+		},
+		isRow,
+		alignItems: node.layout?.alignItems
+	};
+	return `<${tag} class="${allClasses}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${sortedChildren.map((child, index) => {
+		const prev = index > 0 ? sortedChildren[index - 1] : null;
+		const childCtx = {
+			...childCtxBase,
+			prevSibling: prev
+		};
+		return renderNodeWithDedup(child, false, includeLabels, classMode, debugMode, dedupResult, `${path}-${index}`, childCtx, semanticTags, includeNodeId, includeNodeName);
+	}).join("")}</${tag}>`;
+}
+function generateUniqueCssRules(dedupResult) {
+	const rules = [];
+	for (const [nodeId, styles] of dedupResult.uniqueStyles) {
+		if (styles.length === 0) continue;
+		const classNames = dedupResult.nodeClassMap.get(nodeId);
+		if (!classNames) continue;
+		const nodeClass = classNames.find((c) => c.startsWith("n-"));
+		if (!nodeClass) continue;
+		const body = styles.map((s) => `  ${s};`).join("\n");
+		rules.push(`.${nodeClass} {\n${body}\n}`);
+	}
+	return rules.join("\n\n");
+}
+function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules, path, parentCtx, semanticTags = true, includeNodeId = true, includeNodeName = false) {
+	const hasChildren = node.children && node.children.length > 0;
+	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
+	const sortedChildren = hasChildren ? [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y) : [];
+	const spacingAnalysis = hasChildren ? analyzeChildSpacing(node, sortedChildren, isRow) : void 0;
+	const tagInfo = semanticTags ? inferTag(node) : { tag: "div" };
+	const tag = tagInfo.tag;
+	const styleParts = collectStyleParts(node, isRoot, spacingAnalysis, parentCtx);
+	const hasStyles = styleParts.length > 0;
+	const baseClasses = buildClassNames(node, classMode, debugMode);
+	if (tagInfo.extraClass) baseClasses.push(tagInfo.extraClass);
+	const allClasses = [...baseClasses];
+	const nodeId = node.id || `node-${path}`;
+	if (hasStyles) {
+		const nodeClass = `n-${sanitizeClassName(nodeId)}`;
+		allClasses.unshift(nodeClass);
+		const cssBody = styleParts.map((p) => `  ${p};`).join("\n");
+		cssRules.push(`.${nodeClass} {\n${cssBody}\n}`);
+	}
+	const label = includeLabels ? `<span class="layout-label">${escapeHtml(node.name || node.type)}</span>` : "";
+	let content = "";
+	if (node.characters) content = escapeHtml(node.characters);
+	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
+	const dataNodeId = includeNodeId && nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
+	const dataName = includeNodeName && node.name ? ` data-name="${escapeHtml(node.name)}"` : "";
+	if (debugMode && node.id) allClasses.push(nodeIdToClass(node.id));
+	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
+	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
+	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataName}${dataType}${roleAttr}${altAttr} />`;
+	if (!hasChildren) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${content}</${tag}>`;
+	const childCtxBase = {
+		parent: node,
+		useGap: spacingAnalysis?.useGap ?? false,
+		gap: spacingAnalysis?.gap ?? 0,
+		padding: {
+			top: spacingAnalysis?.padding?.top ?? 0,
+			right: spacingAnalysis?.padding?.right ?? 0,
+			bottom: spacingAnalysis?.padding?.bottom ?? 0,
+			left: spacingAnalysis?.padding?.left ?? 0
+		},
+		isRow,
+		alignItems: node.layout?.alignItems
+	};
+	const childrenHtml = sortedChildren.map((child, index) => {
+		const prev = index > 0 ? sortedChildren[index - 1] : null;
+		const childCtx = {
+			...childCtxBase,
+			prevSibling: prev
+		};
+		return renderNode(child, false, includeLabels, classMode, debugMode, cssRules, `${path}-${index}`, childCtx, semanticTags, includeNodeId, includeNodeName);
+	}).join("");
+	return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${childrenHtml}</${tag}>`;
+}
+var BASE_STYLES = `body { margin: 0; padding: 16px; }
+.layout-root { position: relative; }
+.layout-node { box-sizing: border-box; flex-shrink: 0; }
+/* 组合类：flex方向 + 交叉轴对齐 */
+.flex-row-start { display: flex; flex-direction: row; align-items: flex-start; }
+.flex-row-center { display: flex; flex-direction: row; align-items: center; }
+.flex-row-end { display: flex; flex-direction: row; align-items: flex-end; }
+.flex-col-start { display: flex; flex-direction: column; align-items: flex-start; }
+.flex-col-center { display: flex; flex-direction: column; align-items: center; }
+.flex-col-end { display: flex; flex-direction: column; align-items: flex-end; }
+/* 主轴对齐（较少使用，保留单独类） */
+.justify-center { justify-content: center; }
+.justify-end { justify-content: flex-end; }
+.justify-between { justify-content: space-between; }
+/* 按钮重置并默认居中 */
+.btn { display: inline-flex; align-items: center; justify-content: center; text-align: center; border: none; padding: 0; background: none; outline: none; appearance: none; -webkit-appearance: none; }
+/* 图片/图标占位背景 - 纯灰色，与背景渐变区分 */
+.type-image, .type-icon, .type-vector { background: #d1d5db !important; border-radius: 4px; }`;
+function renderLayoutPageWithCss(node, options = {}) {
+	const { title = "Layout Render", includeStyles = true, ...rest } = options;
+	const { rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, enableDedup = false, semanticTags = true, includeNodeId = true, includeNodeName = false } = rest;
+	const designWidth = node.width || 1920;
+	const cleanedNode = removeRedundantNesting(node);
+	let body;
+	let css;
+	if (enableDedup) {
+		const entries = [];
+		collectAllStyles(cleanedNode, true, "0", void 0, entries, []);
+		const dedupResult = deduplicateStyles(entries);
+		body = `<div id="layout-container" class="${rootClassName}">${renderNodeWithDedup(cleanedNode, true, includeLabels, classMode, debugMode, dedupResult, "0", void 0, semanticTags, includeNodeId, includeNodeName)}</div>`;
+		css = [generateSharedCss(dedupResult.sharedClasses), generateUniqueCssRules(dedupResult)].filter(Boolean).join("\n\n");
+	} else {
+		const cssRules = [];
+		body = `<div id="layout-container" class="${rootClassName}">${renderNode(cleanedNode, true, includeLabels, classMode, debugMode, cssRules, "0", void 0, semanticTags, includeNodeId, includeNodeName)}</div>`;
+		css = cssRules.join("\n\n");
+	}
+	const fullCss = `${BASE_STYLES}\n\n${css}`;
+	const scaleScript = `
+    <script>
+      (function() {
+        var designWidth = ${designWidth};
+        var container = document.getElementById('layout-container');
+        function updateScale() {
+          var deviceWidth = window.innerWidth - 32; // 减去 body padding
+          var scale = Math.min(deviceWidth / designWidth, 1);
+          container.style.transform = 'scale(' + scale + ')';
+          container.style.transformOrigin = 'top left';
+        }
+        updateScale();
+        window.addEventListener('resize', updateScale);
+      })();
+    <\/script>`;
+	return {
+		html: `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    ${includeStyles ? `<style>\n${fullCss}\n    </style>` : ""}
+  </head>
+  <body>
+    ${body}
+    ${scaleScript}
+  </body>
+</html>`,
+		css,
+		fullCss
+	};
+}
+const DEFAULT_COMPRESS_OPTIONS = {
+	simplifyId: false,
+	removeCoordinates: true,
+	removeName: true,
+	keepImageName: true,
+	keepAllName: true,
+	omitDefaults: true,
+	convertColors: true,
+	removeUnits: true,
+	minify: true
+};
+function rgbToHex(color) {
+	if (!color) return color;
+	if (color.startsWith("#")) return color;
+	const rgbMatch = color.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
+	if (rgbMatch) {
+		const [, r, g, b] = rgbMatch;
+		return rgbComponentsToHex(parseInt(r), parseInt(g), parseInt(b));
+	}
+	const rgbaMatch = color.match(/rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)/);
+	if (rgbaMatch) {
+		const [, r, g, b, a] = rgbaMatch;
+		const alpha = parseFloat(a);
+		if (alpha >= .99) return rgbComponentsToHex(parseInt(r), parseInt(g), parseInt(b));
+		return rgbComponentsToHex(parseInt(r), parseInt(g), parseInt(b), alpha);
+	}
+	return color;
+}
+function rgbComponentsToHex(r, g, b, a) {
+	const toHex = (n) => n.toString(16).padStart(2, "0");
+	const hex = `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+	if (a !== void 0 && a < 1) {
+		const hex8 = hex + toHex(Math.round(a * 255));
+		if (canSimplifyHex8(hex8)) return `#${hex8[1]}${hex8[3]}${hex8[5]}${hex8[7]}`;
+		return hex8;
+	}
+	if (canSimplifyHex(hex)) return `#${hex[1]}${hex[3]}${hex[5]}`;
+	return hex;
+}
+function canSimplifyHex(hex) {
+	return hex[1] === hex[2] && hex[3] === hex[4] && hex[5] === hex[6];
+}
+function canSimplifyHex8(hex) {
+	return hex[1] === hex[2] && hex[3] === hex[4] && hex[5] === hex[6] && hex[7] === hex[8];
+}
+function extractNumber(value) {
+	if (value === void 0 || value === null) return void 0;
+	if (typeof value === "number") return value;
+	const match = value.match(/^([\d.]+)/);
+	if (match) {
+		const num = parseFloat(match[1]);
+		return Number.isInteger(num) ? num : num;
+	}
+}
+function simplifyBorderRadius(value) {
+	if (!value) return void 0;
+	const numbers = value.match(/[\d.]+/g);
+	if (!numbers) return void 0;
+	if (numbers.length === 1) return parseFloat(numbers[0]);
+	if (numbers.length === 4) {
+		const nums = numbers.map((n) => parseFloat(n));
+		if (nums.every((n) => n === nums[0])) return nums[0];
+		return nums.join(" ");
+	}
+	return value;
+}
+function simplifyJustify(value) {
+	if (!value || value === "flex-start") return void 0;
+	return {
+		"flex-end": "end",
+		"space-between": "between",
+		"space-around": "around",
+		"space-evenly": "evenly"
+	}[value] || value;
+}
+function simplifyAlign(value) {
+	if (!value || value === "flex-start") return void 0;
+	return { "flex-end": "end" }[value] || value;
+}
+function isEmptyObject(obj) {
+	if (!obj) return true;
+	return Object.keys(obj).length === 0;
+}
+var idCounter = 0;
+var idMap = /* @__PURE__ */ new Map();
+function compressDSL(node, options) {
+	const opts = {
+		...DEFAULT_COMPRESS_OPTIONS,
+		...options
+	};
+	if (opts.simplifyId) {
+		idCounter = 0;
+		idMap.clear();
+	}
+	return compressNode(node, opts);
+}
+function compressNode(node, opts) {
+	const result = {
+		id: getCompressedId(node.id, opts),
+		type: node.type,
+		w: node.width,
+		h: node.height
+	};
+	if (shouldKeepName(node, opts)) result.name = node.name;
+	if (node.type === "TEXT" && node.characters) result.text = node.characters;
+	if (node.imageRole) result.role = node.imageRole === "background" ? "bg" : "img";
+	const layout = compressLayout(node.layout, opts);
+	if (!isEmptyObject(layout)) result.layout = layout;
+	const styles = compressStyles(node.styles, opts);
+	if (!isEmptyObject(styles)) result.styles = styles;
+	if (node.children && node.children.length > 0) result.children = node.children.map((child) => compressNode(child, opts));
+	return result;
+}
+function getCompressedId(id, opts) {
+	if (!opts.simplifyId) return id;
+	if (!idMap.has(id)) idMap.set(id, ++idCounter);
+	return idMap.get(id);
+}
+function compressLayout(layout, opts) {
+	if (!layout) return void 0;
+	const result = {};
+	if (layout.flexDirection) result.flexDirection = layout.flexDirection;
+	if (layout.flexWrap === "wrap") result.wrap = true;
+	const justify = opts.omitDefaults ? simplifyJustify(layout.justifyContent) : layout.justifyContent;
+	if (justify) result.justifyContent = justify;
+	const align = opts.omitDefaults ? simplifyAlign(layout.alignItems) : layout.alignItems;
+	if (align) result.alignItems = align;
+	if (layout.gap && layout.gap > 0) result.gap = layout.gap;
+	if (layout.paddingTop && layout.paddingTop > 0) result.pt = layout.paddingTop;
+	if (layout.paddingRight && layout.paddingRight > 0) result.pr = layout.paddingRight;
+	if (layout.paddingBottom && layout.paddingBottom > 0) result.pb = layout.paddingBottom;
+	if (layout.paddingLeft && layout.paddingLeft > 0) result.pl = layout.paddingLeft;
+	if (layout.marginTop && layout.marginTop > 0) result.mt = layout.marginTop;
+	if (layout.marginRight && layout.marginRight > 0) result.mr = layout.marginRight;
+	if (layout.marginBottom && layout.marginBottom > 0) result.mb = layout.marginBottom;
+	if (layout.marginLeft && layout.marginLeft > 0) result.ml = layout.marginLeft;
+	return result;
+}
+function compressStyles(styles, opts) {
+	if (!styles) return void 0;
+	const result = {};
+	if (styles.background) result.bg = opts.convertColors ? rgbToHex(styles.background) : styles.background;
+	if (styles.border) result.border = opts.convertColors ? convertBorderColor(styles.border) : styles.border;
+	if (styles.borderRadius) result.borderRadius = opts.removeUnits ? simplifyBorderRadius(styles.borderRadius) : styles.borderRadius;
+	if (styles.boxShadow) result.boxShadow = opts.convertColors ? convertShadowColor$1(styles.boxShadow) : styles.boxShadow;
+	if (styles.opacity !== void 0 && styles.opacity < 1) result.opacity = styles.opacity;
+	if (styles.color) result.color = opts.convertColors ? rgbToHex(styles.color) : styles.color;
+	if (styles.fontFamily) result.fontFamily = styles.fontFamily;
+	if (styles.fontSize) result.fontSize = opts.removeUnits ? extractNumber(styles.fontSize) : void 0;
+	if (styles.fontWeight) result.fontWeight = styles.fontWeight;
+	if (styles.lineHeight) result.lineHeight = extractNumber(styles.lineHeight);
+	if (styles.letterSpacing) {
+		const ls = extractNumber(styles.letterSpacing);
+		if (ls && ls !== 0) result.letterSpacing = ls;
+	}
+	if (styles.textAlign && styles.textAlign !== "left") result.textAlign = styles.textAlign;
+	return result;
+}
+function convertBorderColor(border) {
+	return border.replace(/rgb\([^)]+\)/g, (match) => rgbToHex(match));
+}
+function convertShadowColor$1(shadow) {
+	return shadow.replace(/rgba?\([^)]+\)/g, (match) => rgbToHex(match));
+}
+function shouldKeepName(node, opts) {
+	if (opts.keepAllName) return true;
+	if (opts.keepImageName) return [
+		"ICON",
+		"IMAGE",
+		"VECTOR"
+	].includes(node.type);
+	return false;
+}
+function toJsonString(node, minify = true) {
+	return JSON.stringify(node, null, minify ? 0 : 2);
+}
 function preprocess(rootNode, options = {}) {
 	if (!rootNode) return {
 		data: null,
@@ -174,9 +1061,10 @@ function isZeroSize(node) {
 	}
 	return false;
 }
+var NEGATIVE_COORD_TOLERANCE = -5;
 function hasNegativeCoords(node) {
-	if (node.x !== void 0 && node.x < 0) return true;
-	if (node.y !== void 0 && node.y < 0) return true;
+	if (node.x !== void 0 && node.x < NEGATIVE_COORD_TOLERANCE) return true;
+	if (node.y !== void 0 && node.y < NEGATIVE_COORD_TOLERANCE) return true;
 	return false;
 }
 function isHueBlendMode(node) {
@@ -199,14 +1087,14 @@ function normalize(cleanedData, _options = {}) {
 		nodeMap
 	};
 	return {
-		root: normalizeNode(cleanedData, nodeMap, 0, { value: countNodes$1(cleanedData) - 1 }),
+		root: normalizeNode(cleanedData, nodeMap, 0, { value: countNodes(cleanedData) - 1 }),
 		nodeMap
 	};
 }
-function countNodes$1(node) {
+function countNodes(node) {
 	if (!node) return 0;
 	let count = 1;
-	if (node.children && Array.isArray(node.children)) for (const child of node.children) count += countNodes$1(child);
+	if (node.children && Array.isArray(node.children)) for (const child of node.children) count += countNodes(child);
 	return count;
 }
 function normalizeNode(node, nodeMap, depth, counter) {
@@ -311,7 +1199,7 @@ function sortChildrenSpatial(nodes) {
 		}
 	});
 }
-function isSameGeometry$3(a, b) {
+function isSameGeometry$2(a, b) {
 	const e = 1;
 	return Math.abs(a.x - b.x) < e && Math.abs(a.y - b.y) < e && Math.abs(a.width - b.width) < e && Math.abs(a.height - b.height) < e;
 }
@@ -357,13 +1245,6 @@ function figmaColorToRgba(color, opacity = 1) {
 	const a = opacity;
 	if (a === 1) return `rgb(${r}, ${g}, ${b})`;
 	return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
-}
-function figmaColorToHex(color, includeAlpha = false) {
-	const r = Math.round(color.r * 255).toString(16).padStart(2, "0");
-	const g = Math.round(color.g * 255).toString(16).padStart(2, "0");
-	const b = Math.round(color.b * 255).toString(16).padStart(2, "0");
-	if (includeAlpha && color.a !== void 0) return `#${r}${g}${b}${(color.a > 1 ? color.a : Math.round(color.a * 255)).toString(16).padStart(2, "0")}`;
-	return `#${r}${g}${b}`;
 }
 function parseColorString(colorStr) {
 	if (!colorStr) return "";
@@ -444,7 +1325,7 @@ function convertCornerRadius(info) {
 	if (tl === tr && tr === br && br === bl) return `${tl}px`;
 	return `${tl}px ${tr}px ${br}px ${bl}px`;
 }
-function convertShadowColor$1(color) {
+function convertShadowColor(color) {
 	if (!color) return "rgba(0, 0, 0, 0.25)";
 	const r = Math.round(color.r * 255);
 	const g = Math.round(color.g * 255);
@@ -458,11 +1339,11 @@ function convertSingleEffect(effect) {
 	switch (effect.type) {
 		case "DROP_SHADOW": return {
 			type: "shadow",
-			value: `${Math.round(effect.offset?.x ?? 0)}px ${Math.round(effect.offset?.y ?? 0)}px ${Math.round(effect.radius ?? 0)}px ${Math.round(effect.spread ?? 0)}px ${convertShadowColor$1(effect.color)}`
+			value: `${Math.round(effect.offset?.x ?? 0)}px ${Math.round(effect.offset?.y ?? 0)}px ${Math.round(effect.radius ?? 0)}px ${Math.round(effect.spread ?? 0)}px ${convertShadowColor(effect.color)}`
 		};
 		case "INNER_SHADOW": return {
 			type: "shadow",
-			value: `inset ${Math.round(effect.offset?.x ?? 0)}px ${Math.round(effect.offset?.y ?? 0)}px ${Math.round(effect.radius ?? 0)}px ${Math.round(effect.spread ?? 0)}px ${convertShadowColor$1(effect.color)}`
+			value: `inset ${Math.round(effect.offset?.x ?? 0)}px ${Math.round(effect.offset?.y ?? 0)}px ${Math.round(effect.radius ?? 0)}px ${Math.round(effect.spread ?? 0)}px ${convertShadowColor(effect.color)}`
 		};
 		case "LAYER_BLUR": return {
 			type: "filter",
@@ -556,7 +1437,7 @@ function mergeOverlappingSiblings(nodes) {
 			if (toRemove.has(nodes[j].id)) continue;
 			const nodeA = nodes[i];
 			const nodeB = nodes[j];
-			if (isSameGeometry$3(nodeA, nodeB)) {
+			if (isSameGeometry$2(nodeA, nodeB)) {
 				const containerA = isContainer(nodeA);
 				const containerB = isContainer(nodeB);
 				let container = null;
@@ -872,7 +1753,7 @@ const collapseSingleChildRule = {
 		collapseSingleChildContainers(nodes);
 	}
 };
-function isSameGeometry$2(a, b) {
+function isSameGeometry$1(a, b) {
 	const e = 1;
 	return Math.abs((a.x ?? 0) - (b.x ?? 0)) < e && Math.abs((a.y ?? 0) - (b.y ?? 0)) < e && Math.abs((a.width ?? 0) - (b.width ?? 0)) < e && Math.abs((a.height ?? 0) - (b.height ?? 0)) < e;
 }
@@ -886,7 +1767,7 @@ function hasOverflow(parent, child) {
 function getCollapseType(node) {
 	if (!node.children || node.children.length !== 1) return null;
 	const child = node.children[0];
-	if (isSameGeometry$2(node, child)) return "same";
+	if (isSameGeometry$1(node, child)) return "same";
 	if (hasOverflow(node, child)) return "overflow";
 	return null;
 }
@@ -965,7 +1846,7 @@ function mergeSameGeometrySiblings(nodes) {
 			if (toRemove.has(nodes[j].id)) continue;
 			const nodeA = nodes[i];
 			const nodeB = nodes[j];
-			if (!isSameGeometry$2(nodeA, nodeB)) continue;
+			if (!isSameGeometry$1(nodeA, nodeB)) continue;
 			const keepNode = calculateMeaningfulness(nodeA) >= calculateMeaningfulness(nodeB) ? nodeA : nodeB;
 			const removeNode = keepNode === nodeA ? nodeB : nodeA;
 			inheritVisualProps(removeNode, keepNode);
@@ -1404,16 +2285,6 @@ const adjustContainerHeightRule = {
 		}, true);
 	}
 };
-const DEVELOPER_PLUGIN_KEY = "__develoerInfo__";
-function hasDeveloperPluginData(node) {
-	if (node.pluginData && Array.isArray(node.pluginData)) return node.pluginData.some((item) => item.key === DEVELOPER_PLUGIN_KEY);
-	return false;
-}
-function isAtomicComponent(node) {
-	if (node.componentInfo && Array.isArray(node.componentInfo.prop) && node.componentInfo.prop.length > 0) return true;
-	if (hasDeveloperPluginData(node)) return true;
-	return false;
-}
 function postprocess(root, options = {}) {
 	const { autoSort = true, enableGrouping = false } = options;
 	applyRules([root], autoSort ? [
@@ -1463,7 +2334,7 @@ function processPipeline(json, options = {}) {
 		stats
 	};
 }
-const LEAF_TYPES = new Set([
+const LEAF_TYPES$2 = new Set([
 	"TEXT",
 	"IMAGE",
 	"VECTOR",
@@ -1475,7 +2346,7 @@ const LEAF_TYPES = new Set([
 	"BOOLEAN_OPERATION",
 	"ICON"
 ]);
-const CONTAINER_TYPES = new Set([
+const CONTAINER_TYPES$2 = new Set([
 	"FRAME",
 	"GROUP",
 	"SECTION",
@@ -1489,7 +2360,7 @@ const PRESERVE_TYPES = new Set([
 function flattenToLeaves(node, verbose = false) {
 	const leaves = [];
 	function collect(n) {
-		if (LEAF_TYPES.has(n.type)) {
+		if (LEAF_TYPES$2.has(n.type)) {
 			leaves.push(n);
 			return;
 		}
@@ -1497,7 +2368,7 @@ function flattenToLeaves(node, verbose = false) {
 			n.children.forEach((child) => collect(child));
 			return;
 		}
-		if (CONTAINER_TYPES.has(n.type)) {
+		if (CONTAINER_TYPES$2.has(n.type)) {
 			if (verbose) console.log(`[Flatten] 丢弃空容器: ${n.type} "${n.name}" (${n.id})`);
 			return;
 		}
@@ -1508,7 +2379,7 @@ function flattenToLeaves(node, verbose = false) {
 }
 function smartFlatten(node) {
 	function process(n) {
-		if (LEAF_TYPES.has(n.type)) return n;
+		if (LEAF_TYPES$2.has(n.type)) return n;
 		if (PRESERVE_TYPES.has(n.type)) {
 			if (n.children && n.children.length > 0) {
 				const processedChildren = [];
@@ -1524,7 +2395,7 @@ function smartFlatten(node) {
 			}
 			return n;
 		}
-		if (CONTAINER_TYPES.has(n.type)) {
+		if (CONTAINER_TYPES$2.has(n.type)) {
 			if (!n.children || n.children.length === 0) return [];
 			const processedChildren = [];
 			n.children.forEach((child) => {
@@ -1591,15 +2462,6 @@ function preserveGroupsFlatten(node) {
 	}
 	return process(node);
 }
-function flatten(node, options = {}) {
-	const { mode = "smart", verbose = false } = options;
-	switch (mode) {
-		case "full": return flattenToLeaves(node, verbose);
-		case "smart": return smartFlatten(node);
-		case "preserve-groups": return preserveGroupsFlatten(node);
-		default: return smartFlatten(node);
-	}
-}
 var COLLECTABLE_TYPES = new Set([
 	"FRAME",
 	"GROUP",
@@ -1618,9 +2480,9 @@ function collectContainers(tree) {
 	const containerMap = /* @__PURE__ */ new Map();
 	const containerStack = [];
 	function traverse(node, isRoot) {
-		if (LEAF_TYPES.has(node.type)) return new Set([node.id]);
+		if (LEAF_TYPES$2.has(node.type)) return new Set([node.id]);
 		if (!node.children || node.children.length === 0) {
-			if (CONTAINER_TYPES.has(node.type)) return /* @__PURE__ */ new Set();
+			if (CONTAINER_TYPES$2.has(node.type)) return /* @__PURE__ */ new Set();
 			return new Set([node.id]);
 		}
 		const isCollectable = !isRoot && COLLECTABLE_TYPES.has(node.type);
@@ -1662,7 +2524,7 @@ function collectContainers(tree) {
 	}
 	return layers;
 }
-var DEFAULT_OPTIONS$3 = {
+var DEFAULT_OPTIONS$1 = {
 	eps: "auto",
 	minPts: 2,
 	distanceType: "gap",
@@ -1711,7 +2573,7 @@ function calcDistance(a, b, type) {
 }
 function dbscan(nodes, options = {}) {
 	const opts = {
-		...DEFAULT_OPTIONS$3,
+		...DEFAULT_OPTIONS$1,
 		...options
 	};
 	const n = nodes.length;
@@ -1855,7 +2717,7 @@ function calcBounds$4(nodes) {
 		height: maxY - minY
 	};
 }
-var DEFAULT_OPTIONS$2 = {
+var DEFAULT_OPTIONS = {
 	gapThresholdX: 50,
 	gapThresholdY: 30,
 	minClusterSize: 2,
@@ -1863,7 +2725,7 @@ var DEFAULT_OPTIONS$2 = {
 };
 function clusterLeaves(leaves, options = {}) {
 	const opts = {
-		...DEFAULT_OPTIONS$2,
+		...DEFAULT_OPTIONS,
 		...options
 	};
 	if (leaves.length === 0) return createRootNode([]);
@@ -1917,7 +2779,7 @@ function clusterRow(row, opts) {
 	});
 }
 function createGroup(children, type) {
-	const bounds = calcBounds(children);
+	const bounds = calcBounds$3(children);
 	return {
 		id: `vg-${Math.random().toString(36).slice(2, 8)}`,
 		name: type === "row" ? "Row Group" : "Column Group",
@@ -1942,7 +2804,7 @@ function createGroup(children, type) {
 	};
 }
 function createRootNode(children) {
-	const bounds = children.length > 0 ? calcBounds(children) : {
+	const bounds = children.length > 0 ? calcBounds$3(children) : {
 		x: 0,
 		y: 0,
 		width: 0,
@@ -1966,7 +2828,7 @@ function createRootNode(children) {
 		}))
 	};
 }
-function calcBounds(nodes) {
+function calcBounds$3(nodes) {
 	if (nodes.length === 0) return {
 		x: 0,
 		y: 0,
@@ -1998,7 +2860,7 @@ function clusterWithinContainers(node, options = {}) {
 		const leafChildren = [];
 		const containerChildren = [];
 		n.children.forEach((child) => {
-			if (LEAF_TYPES.has(child.type)) leafChildren.push(child);
+			if (LEAF_TYPES$2.has(child.type)) leafChildren.push(child);
 			else if (!child.children || child.children.length === 0) leafChildren.push(child);
 			else containerChildren.push(process(child));
 		});
@@ -2035,7 +2897,7 @@ function placeContainerById(root, template, originalChildIds) {
 	root.children = [...remaining, container];
 	return true;
 }
-function calcBounds$3(nodes) {
+function calcBounds$2(nodes) {
 	if (nodes.length === 0) return {
 		x: 0,
 		y: 0,
@@ -2064,9 +2926,11 @@ function placeVirtualGroupById(root, template, originalChildIds) {
 	const childIdSet = new Set(originalChildIds);
 	const victims = [];
 	const remaining = [];
-	for (const child of root.children) (childIdSet.has(child.id) ? victims : remaining).push(child);
+	for (const child of root.children) if (childIdSet.has(child.id)) victims.push(child);
+	else if (child.type === "VIRTUAL_GROUP" && child.children?.some((gc) => childIdSet.has(gc.id))) victims.push(child);
+	else remaining.push(child);
 	if (victims.length < 2 || victims.length < originalChildIds.length / 2) return false;
-	const bounds = calcBounds$3(victims);
+	const bounds = calcBounds$2(victims);
 	const virtualGroup = {
 		id: `rel-${template.id}`,
 		name: `RelGroup ${template.name || template.id}`,
@@ -2144,6 +3008,7 @@ function clusterUncoveredNodes(root, options) {
 			minClusterSize
 		});
 		node.children = [...kept, ...clustered.children || loose];
+		node.children.sort((a, b) => a.y - b.y || a.x - b.x);
 	}
 	processNode$1(root);
 }
@@ -2302,214 +3167,14 @@ function detectAlignmentForColumn(children, containerWidth) {
 	if (containerWidth && items.every((item) => Math.abs(item.width - containerWidth) <= TOLERANCE)) return "stretch";
 	return "flex-start";
 }
-function getTextBaselineWidth(node) {
-	return getTextBaselineInfo(node)?.width;
-}
-function getTextBaselineInfo(node) {
-	if (node.type !== "TEXT") return void 0;
-	const baselines = node.textData?.baselines;
-	if (!Array.isArray(baselines) || baselines.length === 0) return void 0;
-	let maxWidth = -Infinity;
-	let offsetX = 0;
-	for (const b of baselines) {
-		const width = b?.width;
-		if (typeof width === "number" && width > maxWidth) {
-			maxWidth = width;
-			const posX = b?.position?.x;
-			offsetX = typeof posX === "number" ? posX : 0;
-		}
-	}
-	if (maxWidth > 0) return {
-		width: maxWidth,
-		offsetX
-	};
-}
-function hasVisualStylesForSpacing(node) {
-	if (node.type === "TEXT") return false;
-	if (node.styles?.background || node.styles?.border || node.styles?.borderRadius) return true;
-	if (Array.isArray(node.fills) && node.fills.length > 0) return true;
-	if (Array.isArray(node.strokes) && node.strokes.length > 0) return true;
-	if (node.cornerRadius !== void 0 || node.borderRadius !== void 0) return true;
-	return false;
-}
-function getEffectiveBounds(node) {
-	if (node.children && node.children.length > 0 && !hasVisualStylesForSpacing(node)) {
-		let minX = Infinity, minY = Infinity;
-		let maxX = -Infinity, maxY = -Infinity;
-		for (const child of node.children) {
-			const b = getEffectiveBounds(child);
-			minX = Math.min(minX, b.x);
-			minY = Math.min(minY, b.y);
-			maxX = Math.max(maxX, b.x + b.width);
-			maxY = Math.max(maxY, b.y + b.height);
-		}
-		if (minX !== Infinity && minY !== Infinity && maxX !== -Infinity && maxY !== -Infinity) return {
-			x: minX,
-			y: minY,
-			width: maxX - minX,
-			height: maxY - minY
-		};
-	}
-	const baselineInfo = getTextBaselineInfo(node);
-	if (baselineInfo) return {
-		x: node.x + baselineInfo.offsetX,
-		y: node.y,
-		width: baselineInfo.width,
-		height: node.height
-	};
-	return {
-		x: node.x,
-		y: node.y,
-		width: node.width,
-		height: node.height
-	};
-}
-function calcChildrenMargins(children, direction) {
-	if (children.length === 0) return [];
-	const sorted = sortByDirection(children, direction);
-	const margins = [];
-	for (let i = 0; i < sorted.length; i++) {
-		if (i === 0) {
-			margins.push({});
-			continue;
-		}
-		const prev = sorted[i - 1];
-		const curr = sorted[i];
-		let gap = calcGap(prev, curr, direction);
-		if (gap < 0 && gap >= -2) gap = 0;
-		if (gap < 0 && !hasCrossAxisOverlap(prev, curr, direction)) gap = 0;
-		if (direction === "row") margins.push({ marginLeft: gap !== 0 ? gap : void 0 });
-		else margins.push({ marginTop: gap !== 0 ? gap : void 0 });
-	}
-	return restoreOrder(children, sorted, margins);
-}
-function sortByDirection(children, direction) {
-	return [...children].sort((a, b) => {
-		if (direction === "row") return a.x - b.x;
-		else return a.y - b.y;
-	});
-}
-function hasCrossAxisOverlap(a, b, direction) {
-	if (direction === "row") return a.y < b.y + b.height && b.y < a.y + a.height;
-	else return a.x < b.x + b.width && b.x < a.x + a.width;
-}
-function calcGap(prev, curr, direction) {
-	if (direction === "row") {
-		const prevRight = prev.x + prev.width;
-		return curr.x - prevRight;
-	} else {
-		const prevBottom = prev.y + prev.height;
-		return curr.y - prevBottom;
-	}
-}
-function restoreOrder(original, sorted, margins) {
-	const marginMap = /* @__PURE__ */ new Map();
-	sorted.forEach((node, index) => {
-		marginMap.set(node.id, margins[index]);
-	});
-	return original.map((node) => marginMap.get(node.id) || {});
-}
-function analyzeChildSpacing(parent, sortedChildren, isRow) {
-	const result = {
-		useGap: false,
-		gap: 0,
-		padding: {
-			top: 0,
-			right: 0,
-			bottom: 0,
-			left: 0
-		}
-	};
-	if (sortedChildren.length === 0) return result;
-	const parentBounds = getEffectiveBounds(parent);
-	let minTop = Infinity, minLeft = Infinity, minRight = Infinity, minBottom = Infinity;
-	for (const child of sortedChildren) {
-		const bounds = getEffectiveBounds(child);
-		minTop = Math.min(minTop, bounds.y - parentBounds.y);
-		minLeft = Math.min(minLeft, bounds.x - parentBounds.x);
-		minRight = Math.min(minRight, parentBounds.x + parentBounds.width - (bounds.x + bounds.width));
-		minBottom = Math.min(minBottom, parentBounds.y + parentBounds.height - (bounds.y + bounds.height));
-	}
-	result.padding.top = Math.max(0, minTop);
-	result.padding.left = Math.max(0, minLeft);
-	result.padding.right = Math.max(0, minRight);
-	result.padding.bottom = Math.max(0, minBottom);
-	if (sortedChildren.length < 2) {
-		result.useGap = true;
-		result.gap = 0;
-		return result;
-	}
-	const gaps = [];
-	for (let i = 1; i < sortedChildren.length; i++) {
-		const prev = getEffectiveBounds(sortedChildren[i - 1]);
-		const curr = getEffectiveBounds(sortedChildren[i]);
-		if (isRow) gaps.push(Math.max(0, curr.x - (prev.x + prev.width)));
-		else gaps.push(Math.max(0, curr.y - (prev.y + prev.height)));
-	}
-	const minGap = Math.min(...gaps);
-	const maxGap = Math.max(...gaps);
-	if (maxGap - minGap <= 2) {
-		result.useGap = true;
-		result.gap = Math.round((minGap + maxGap) / 2);
-	}
-	return result;
-}
-function calcChildMargins(child, parent, prevChild, isRow, parentUsesGap, parentGap, parentPadding, alignItems) {
-	const result = {
-		marginTop: 0,
-		marginLeft: 0
-	};
-	const parentBounds = getEffectiveBounds(parent);
-	const currBounds = getEffectiveBounds(child);
-	if (isRow) {
-		if (prevChild) {
-			const prevBounds = getEffectiveBounds(prevChild);
-			const prevRight = prevBounds.x + prevBounds.width;
-			let actualGap = currBounds.x - prevRight;
-			if (actualGap < 0 && actualGap >= -2) actualGap = 0;
-			if (!parentUsesGap) result.marginLeft = actualGap;
-			else if (Math.abs(actualGap - parentGap) > 2) result.marginLeft = actualGap - parentGap;
-		}
-		const contentTop = parentBounds.y + parentPadding.top;
-		const contentBottom = parentBounds.y + parentBounds.height - parentPadding.bottom;
-		const contentHeight = Math.max(0, contentBottom - contentTop);
-		const childHeight = currBounds.height;
-		const align = alignItems || "flex-start";
-		let expectedTop = contentTop;
-		if (align === "center") expectedTop = contentTop + (contentHeight - childHeight) / 2;
-		else if (align === "flex-end") expectedTop = contentBottom - childHeight;
-		const delta = currBounds.y - expectedTop;
-		if (Math.abs(delta) > 1) result.marginTop = delta;
-	} else {
-		if (prevChild) {
-			const prevBounds = getEffectiveBounds(prevChild);
-			const prevBottom = prevBounds.y + prevBounds.height;
-			let actualGap = currBounds.y - prevBottom;
-			if (actualGap < 0 && actualGap >= -2) actualGap = 0;
-			if (!parentUsesGap) result.marginTop = actualGap;
-			else if (Math.abs(actualGap - parentGap) > 2) result.marginTop = actualGap - parentGap;
-		}
-		const contentLeft = parentBounds.x + parentPadding.left;
-		const contentRight = parentBounds.x + parentBounds.width - parentPadding.right;
-		const contentWidth = Math.max(0, contentRight - contentLeft);
-		const childWidth = currBounds.width;
-		const align = alignItems || "flex-start";
-		let expectedLeft = contentLeft;
-		if (align === "center") expectedLeft = contentLeft + (contentWidth - childWidth) / 2;
-		else if (align === "flex-end") expectedLeft = contentRight - childWidth;
-		const delta = currBounds.x - expectedLeft;
-		if (Math.abs(delta) > 1) result.marginLeft = delta;
-	}
-	return result;
-}
-var CONTAINER_TYPES$2 = new Set([
+var CONTAINER_TYPES$1 = new Set([
 	"FRAME",
 	"GROUP",
 	"INSTANCE",
 	"COMPONENT",
 	"SECTION"
 ]);
-function calcBounds$2(elements) {
+function calcBounds$1(elements) {
 	if (elements.length === 0) return {
 		x: 0,
 		y: 0,
@@ -2538,7 +3203,7 @@ function calcCoverageRatio(element, bounds) {
 }
 function isFullCoverElement(element, bounds, allElements) {
 	if (calcCoverageRatio(element, bounds) < .95) return false;
-	if (!CONTAINER_TYPES$2.has(element.type)) return false;
+	if (!CONTAINER_TYPES$1.has(element.type)) return false;
 	return allElements.some((el) => el.id !== element.id && (el.zIndex ?? 0) > (element.zIndex ?? 0));
 }
 function isolateFullCoverElements(elements) {
@@ -2547,7 +3212,7 @@ function isolateFullCoverElements(elements) {
 		isolated: [],
 		hasIsolated: false
 	};
-	const bounds = calcBounds$2(elements);
+	const bounds = calcBounds$1(elements);
 	const isolated = [];
 	const normal = [];
 	for (const element of elements) if (isFullCoverElement(element, bounds, elements)) isolated.push(element);
@@ -2609,7 +3274,7 @@ function prefilterOverlappingLayers(elements) {
 		hasChanges: dedupeResult.hasRemoved || isolateResult.hasIsolated
 	};
 }
-function calcBounds$1(nodes) {
+function calcBounds(nodes) {
 	if (nodes.length === 0) return {
 		x: 0,
 		y: 0,
@@ -2631,7 +3296,7 @@ function calcBounds$1(nodes) {
 		height: maxY - minY
 	};
 }
-function isSameGeometry$1(a, b, tolerance = 2) {
+function isSameGeometry(a, b, tolerance = 2) {
 	return Math.abs(a.x - b.x) <= tolerance && Math.abs(a.y - b.y) <= tolerance && Math.abs(a.width - b.width) <= tolerance && Math.abs(a.height - b.height) <= tolerance;
 }
 function absorbFullCoverLayersAsBackground(parent, isolated, normalNodes) {
@@ -2639,11 +3304,11 @@ function absorbFullCoverLayersAsBackground(parent, isolated, normalNodes) {
 	if (normalNodes.length === 0) return isolated;
 	const parentArea = Math.max(0, (parent.width || 0) * (parent.height || 0));
 	if (parentArea === 0) return isolated;
-	const normalBounds = calcBounds$1(normalNodes);
+	const normalBounds = calcBounds(normalNodes);
 	if (Math.max(0, normalBounds.width * normalBounds.height) / parentArea < .35) return isolated;
 	const kept = [];
 	for (const layer of isolated) {
-		if (!isSameGeometry$1(layer, parent, 2)) {
+		if (!isSameGeometry(layer, parent, 2)) {
 			kept.push(layer);
 			continue;
 		}
@@ -2675,7 +3340,7 @@ function absorbFullCoverLayersAsBackground(parent, isolated, normalNodes) {
 	}
 	return kept;
 }
-var LEAF_TYPES$2 = new Set([
+var LEAF_TYPES$1 = new Set([
 	"TEXT",
 	"IMAGE",
 	"VECTOR",
@@ -2697,7 +3362,7 @@ function isFullCover(node, parent, threshold = .9) {
 	return nodeArea / parentArea >= threshold;
 }
 function canBeContainer(node) {
-	if (LEAF_TYPES$2.has(node.type)) return false;
+	if (LEAF_TYPES$1.has(node.type)) return false;
 	if (node.width < 50 || node.height < 50) return false;
 	return true;
 }
@@ -2747,14 +3412,6 @@ function regroupByContainment(children, parent) {
 		} else result.push(child);
 	}
 	return result;
-}
-function regroupTreeByContainment(node) {
-	if (!node.children || node.children.length <= 1) return node;
-	const regrouped = regroupByContainment(node.children.map((c) => regroupTreeByContainment(c)), node);
-	return {
-		...node,
-		children: regrouped
-	};
 }
 var MIN_GAP_THRESHOLD = 2;
 var FULL_WIDTH_THRESHOLD = .8;
@@ -2953,19 +3610,6 @@ function splitResultToTree(result, idPrefix = "split", options = {}, isRoot = tr
 		}
 	};
 }
-function printSplitResult(result, indent = "") {
-	const lines = [];
-	if (result.type === "empty") lines.push(`${indent}[Empty]`);
-	else if (result.type === "leaf" && result.element) lines.push(`${indent}[Leaf] ${result.element.name || "unnamed"}`);
-	else if (result.type === "overlap" && result.elements) {
-		const names = result.elements.map((c) => c.name || "unnamed").join(", ");
-		lines.push(`${indent}[Overlap] ${names}`);
-	} else if (result.children) {
-		lines.push(`${indent}[${result.type.toUpperCase()}]`);
-		for (const child of result.children) lines.push(printSplitResult(child, indent + "  "));
-	}
-	return lines.join("\n");
-}
 function separateBackgroundNodes(nodes) {
 	const backgroundNodes = [];
 	const normalNodes = [];
@@ -3011,14 +3655,14 @@ function splitWithinContainers(node) {
 		children: nextChildren
 	};
 }
-var CONTAINER_TYPES$1 = new Set([
+var CONTAINER_TYPES = new Set([
 	"FRAME",
 	"GROUP",
 	"VIRTUAL_GROUP",
 	"INSTANCE",
 	"COMPONENT"
 ]);
-var LEAF_TYPES$1 = new Set([
+var LEAF_TYPES = new Set([
 	"TEXT",
 	"IMAGE",
 	"ICON",
@@ -3067,8 +3711,8 @@ function traverseAndApply(node) {
 }
 function shouldProcessNode(node) {
 	if (!node.children || node.children.length === 0) return false;
-	if (LEAF_TYPES$1.has(node.type)) return false;
-	if (CONTAINER_TYPES$1.has(node.type)) return true;
+	if (LEAF_TYPES.has(node.type)) return false;
+	if (CONTAINER_TYPES.has(node.type)) return true;
 	return true;
 }
 function convertTextStyles(input) {
@@ -3097,6 +3741,10 @@ function convertTextStyles(input) {
 	if (textInfo?.letterSpacing) result.letterSpacing = `${Math.round(textInfo.letterSpacing)}px`;
 	const textColor = extractTextColor(input, textInfo);
 	if (textColor) result.color = textColor;
+	const textAlignH = input.textAlignHorizontal?.toUpperCase();
+	if (textAlignH === "CENTER") result.textAlign = "center";
+	else if (textAlignH === "RIGHT") result.textAlign = "right";
+	else if (textAlignH === "JUSTIFIED") result.textAlign = "justify";
 	if (textInfo?.textDecorationLine && textInfo.textDecorationLine !== "unset") result.textDecoration = textInfo.textDecorationLine;
 	if (textInfo?.textTransform && textInfo.textTransform !== "unset") result.textTransform = textInfo.textTransform;
 	return Object.keys(result).length > 0 ? result : void 0;
@@ -3135,742 +3783,6 @@ function extractTextColor(input, textInfo) {
 			return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
 		}
 	}
-}
-function parseColor(color) {
-	color = color.trim();
-	if (color.startsWith("#")) {
-		const hex = color.slice(1);
-		if (hex.length === 3) return {
-			r: parseInt(hex[0] + hex[0], 16),
-			g: parseInt(hex[1] + hex[1], 16),
-			b: parseInt(hex[2] + hex[2], 16)
-		};
-		if (hex.length === 6 || hex.length === 8) return {
-			r: parseInt(hex.slice(0, 2), 16),
-			g: parseInt(hex.slice(2, 4), 16),
-			b: parseInt(hex.slice(4, 6), 16)
-		};
-	}
-	const rgbMatch = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-	if (rgbMatch) return {
-		r: parseInt(rgbMatch[1], 10),
-		g: parseInt(rgbMatch[2], 10),
-		b: parseInt(rgbMatch[3], 10)
-	};
-	return null;
-}
-function rgbToLab(rgb) {
-	let r = rgb.r / 255;
-	let g = rgb.g / 255;
-	let b = rgb.b / 255;
-	r = r > .04045 ? Math.pow((r + .055) / 1.055, 2.4) : r / 12.92;
-	g = g > .04045 ? Math.pow((g + .055) / 1.055, 2.4) : g / 12.92;
-	b = b > .04045 ? Math.pow((b + .055) / 1.055, 2.4) : b / 12.92;
-	const x = (r * .4124564 + g * .3575761 + b * .1804375) / .95047;
-	const y = r * .2126729 + g * .7151522 + b * .072175;
-	const z = (r * .0193339 + g * .119192 + b * .9503041) / 1.08883;
-	const fx = x > .008856 ? Math.pow(x, 1 / 3) : 7.787 * x + 16 / 116;
-	const fy = y > .008856 ? Math.pow(y, 1 / 3) : 7.787 * y + 16 / 116;
-	const fz = z > .008856 ? Math.pow(z, 1 / 3) : 7.787 * z + 16 / 116;
-	return {
-		l: 116 * fy - 16,
-		a: 500 * (fx - fy),
-		b: 200 * (fy - fz)
-	};
-}
-function colorDistance(color1, color2) {
-	const rgb1 = parseColor(color1);
-	const rgb2 = parseColor(color2);
-	if (!rgb1 || !rgb2) return Infinity;
-	const lab1 = rgbToLab(rgb1);
-	const lab2 = rgbToLab(rgb2);
-	const deltaL = lab1.l - lab2.l;
-	const deltaA = lab1.a - lab2.a;
-	const deltaB = lab1.b - lab2.b;
-	return Math.sqrt(deltaL * deltaL + deltaA * deltaA + deltaB * deltaB);
-}
-function findClosestColor(targetColor, tokenColors, tolerance = 5) {
-	let closest = null;
-	for (const [name, value] of Object.entries(tokenColors)) {
-		const distance = colorDistance(targetColor, value);
-		if (distance <= tolerance && (!closest || distance < closest.distance)) closest = {
-			name,
-			value,
-			distance
-		};
-	}
-	return closest;
-}
-function isExactColorMatch(color1, color2) {
-	return colorDistance(color1, color2) < 1;
-}
-function findClosestNumber(target, tokenValues, tolerance = .1) {
-	let closest = null;
-	for (const [name, value] of Object.entries(tokenValues)) {
-		const diff = Math.abs(target - value);
-		if ((target !== 0 ? diff / Math.abs(target) : value === 0 ? 0 : Infinity) <= tolerance && (!closest || diff < closest.diff)) closest = {
-			name,
-			value,
-			diff
-		};
-	}
-	return closest;
-}
-function findExactNumber(target, tokenValues) {
-	for (const [name, value] of Object.entries(tokenValues)) if (value === target) return {
-		name,
-		value
-	};
-	return null;
-}
-function findNearestNumber(target, tokenValues) {
-	let nearest = null;
-	for (const [name, value] of Object.entries(tokenValues)) {
-		const diff = Math.abs(target - value);
-		if (!nearest || diff < nearest.diff) nearest = {
-			name,
-			value,
-			diff
-		};
-	}
-	return nearest;
-}
-var DEFAULT_OPTIONS$1 = {
-	colorTolerance: 5,
-	numberTolerance: .1,
-	fuzzyMatch: true,
-	fallback: "raw"
-};
-var TokenMatcher = class {
-	config;
-	options;
-	constructor(config, options = {}) {
-		this.config = config;
-		this.options = {
-			...DEFAULT_OPTIONS$1,
-			...options
-		};
-	}
-	matchColor(color) {
-		if (!this.config.colors) return null;
-		for (const [name, value] of Object.entries(this.config.colors)) if (isExactColorMatch(color, value)) return {
-			name,
-			cssVar: `var(--color-${name})`,
-			rawValue: color,
-			tokenValue: value,
-			confidence: 1
-		};
-		if (this.options.fuzzyMatch) {
-			const closest = findClosestColor(color, this.config.colors, this.options.colorTolerance);
-			if (closest) {
-				const confidence = Math.max(0, 1 - closest.distance / (this.options.colorTolerance * 2));
-				return {
-					name: closest.name,
-					cssVar: `var(--color-${closest.name})`,
-					rawValue: color,
-					tokenValue: closest.value,
-					confidence
-				};
-			}
-		}
-		return null;
-	}
-	matchFontSize(size) {
-		if (!this.config.fontSizes) return null;
-		const exact = findExactNumber(size, this.config.fontSizes);
-		if (exact) return {
-			name: exact.name,
-			cssVar: `var(--font-size-${exact.name})`,
-			rawValue: size,
-			tokenValue: exact.value,
-			confidence: 1
-		};
-		if (this.options.fuzzyMatch) {
-			const closest = findClosestNumber(size, this.config.fontSizes, this.options.numberTolerance);
-			if (closest) {
-				const confidence = Math.max(0, 1 - closest.diff / size);
-				return {
-					name: closest.name,
-					cssVar: `var(--font-size-${closest.name})`,
-					rawValue: size,
-					tokenValue: closest.value,
-					confidence
-				};
-			}
-		}
-		if (this.options.fallback === "nearest") {
-			const nearest = findNearestNumber(size, this.config.fontSizes);
-			if (nearest) return {
-				name: nearest.name,
-				cssVar: `var(--font-size-${nearest.name})`,
-				rawValue: size,
-				tokenValue: nearest.value,
-				confidence: Math.max(0, 1 - nearest.diff / size)
-			};
-		}
-		return null;
-	}
-	matchFontWeight(weight) {
-		if (!this.config.fontWeights) return null;
-		const exact = findExactNumber(weight, this.config.fontWeights);
-		if (exact) return {
-			name: exact.name,
-			cssVar: `var(--font-weight-${exact.name})`,
-			rawValue: weight,
-			tokenValue: exact.value,
-			confidence: 1
-		};
-		return null;
-	}
-	matchBorderRadius(radius) {
-		if (!this.config.borderRadius) return null;
-		const exact = findExactNumber(radius, this.config.borderRadius);
-		if (exact) return {
-			name: exact.name,
-			cssVar: `var(--radius-${exact.name})`,
-			rawValue: radius,
-			tokenValue: exact.value,
-			confidence: 1
-		};
-		if (this.options.fuzzyMatch) {
-			const closest = findClosestNumber(radius, this.config.borderRadius, this.options.numberTolerance);
-			if (closest) return {
-				name: closest.name,
-				cssVar: `var(--radius-${closest.name})`,
-				rawValue: radius,
-				tokenValue: closest.value,
-				confidence: Math.max(0, 1 - closest.diff / Math.max(radius, 1))
-			};
-		}
-		return null;
-	}
-	matchSpacing(value) {
-		if (!this.config.spacing) return null;
-		const exact = findExactNumber(value, this.config.spacing);
-		if (exact) return {
-			name: exact.name,
-			cssVar: `var(--spacing-${exact.name})`,
-			rawValue: value,
-			tokenValue: exact.value,
-			confidence: 1
-		};
-		if (this.options.fuzzyMatch) {
-			const closest = findClosestNumber(value, this.config.spacing, this.options.numberTolerance);
-			if (closest) return {
-				name: closest.name,
-				cssVar: `var(--spacing-${closest.name})`,
-				rawValue: value,
-				tokenValue: closest.value,
-				confidence: Math.max(0, 1 - closest.diff / Math.max(value, 1))
-			};
-		}
-		return null;
-	}
-	matchOpacity(opacity) {
-		if (!this.config.opacities) return null;
-		const exact = findExactNumber(opacity, this.config.opacities);
-		if (exact) return {
-			name: exact.name,
-			cssVar: `var(--opacity-${exact.name})`,
-			rawValue: opacity,
-			tokenValue: exact.value,
-			confidence: 1
-		};
-		return null;
-	}
-	tokenizeStyles(styles) {
-		const tokenized = {};
-		const raw = {};
-		const matches = [];
-		if (styles.background) {
-			const match = this.matchColor(styles.background);
-			if (match) {
-				tokenized.background = match.cssVar;
-				matches.push(match);
-			} else raw.background = styles.background;
-		}
-		if (styles.color) {
-			const match = this.matchColor(styles.color);
-			if (match) {
-				tokenized.color = match.cssVar;
-				matches.push(match);
-			} else raw.color = styles.color;
-		}
-		if (styles.fontSize) {
-			const size = parseFloat(styles.fontSize);
-			if (!isNaN(size)) {
-				const match = this.matchFontSize(size);
-				if (match) {
-					tokenized.fontSize = match.cssVar;
-					matches.push(match);
-				} else raw.fontSize = styles.fontSize;
-			}
-		}
-		if (styles.fontWeight) {
-			const match = this.matchFontWeight(styles.fontWeight);
-			if (match) {
-				tokenized.fontWeight = match.cssVar;
-				matches.push(match);
-			} else raw.fontWeight = String(styles.fontWeight);
-		}
-		if (styles.borderRadius) {
-			const radius = parseFloat(styles.borderRadius);
-			if (!isNaN(radius)) {
-				const match = this.matchBorderRadius(radius);
-				if (match) {
-					tokenized.borderRadius = match.cssVar;
-					matches.push(match);
-				} else raw.borderRadius = styles.borderRadius;
-			}
-		}
-		if (typeof styles.opacity === "number") {
-			const match = this.matchOpacity(styles.opacity);
-			if (match) {
-				tokenized.opacity = match.cssVar;
-				matches.push(match);
-			} else raw.opacity = String(styles.opacity);
-		}
-		if (styles.border) raw.border = styles.border;
-		if (styles.boxShadow) raw.boxShadow = styles.boxShadow;
-		if (styles.fontFamily) raw.fontFamily = styles.fontFamily;
-		if (styles.lineHeight) raw.lineHeight = styles.lineHeight;
-		if (styles.letterSpacing) raw.letterSpacing = styles.letterSpacing;
-		if (styles.textDecoration) raw.textDecoration = styles.textDecoration;
-		return {
-			tokenized,
-			raw,
-			matches
-		};
-	}
-	generateCssVariables() {
-		const lines = [":root {"];
-		if (this.config.colors) for (const [name, value] of Object.entries(this.config.colors)) lines.push(`  --color-${name}: ${value};`);
-		if (this.config.fontSizes) for (const [name, value] of Object.entries(this.config.fontSizes)) lines.push(`  --font-size-${name}: ${value}px;`);
-		if (this.config.fontWeights) for (const [name, value] of Object.entries(this.config.fontWeights)) lines.push(`  --font-weight-${name}: ${value};`);
-		if (this.config.borderRadius) for (const [name, value] of Object.entries(this.config.borderRadius)) lines.push(`  --radius-${name}: ${value}px;`);
-		if (this.config.spacing) for (const [name, value] of Object.entries(this.config.spacing)) lines.push(`  --spacing-${name}: ${value}px;`);
-		if (this.config.opacities) for (const [name, value] of Object.entries(this.config.opacities)) lines.push(`  --opacity-${name}: ${value};`);
-		lines.push("}");
-		return lines.join("\n");
-	}
-};
-function createTokenMatcher(config, options) {
-	return new TokenMatcher(config, options);
-}
-const tailwindTokens = {
-	name: "Tailwind CSS",
-	colors: {
-		"slate-50": "#f8fafc",
-		"slate-100": "#f1f5f9",
-		"slate-200": "#e2e8f0",
-		"slate-300": "#cbd5e1",
-		"slate-400": "#94a3b8",
-		"slate-500": "#64748b",
-		"slate-600": "#475569",
-		"slate-700": "#334155",
-		"slate-800": "#1e293b",
-		"slate-900": "#0f172a",
-		"gray-50": "#f9fafb",
-		"gray-100": "#f3f4f6",
-		"gray-200": "#e5e7eb",
-		"gray-300": "#d1d5db",
-		"gray-400": "#9ca3af",
-		"gray-500": "#6b7280",
-		"gray-600": "#4b5563",
-		"gray-700": "#374151",
-		"gray-800": "#1f2937",
-		"gray-900": "#111827",
-		"red-500": "#ef4444",
-		"orange-500": "#f97316",
-		"amber-500": "#f59e0b",
-		"yellow-500": "#eab308",
-		"lime-500": "#84cc16",
-		"green-500": "#22c55e",
-		"emerald-500": "#10b981",
-		"teal-500": "#14b8a6",
-		"cyan-500": "#06b6d4",
-		"sky-500": "#0ea5e9",
-		"blue-500": "#3b82f6",
-		"indigo-500": "#6366f1",
-		"violet-500": "#8b5cf6",
-		"purple-500": "#a855f7",
-		"fuchsia-500": "#d946ef",
-		"pink-500": "#ec4899",
-		"rose-500": "#f43f5e",
-		"white": "#ffffff",
-		"black": "#000000",
-		"transparent": "transparent"
-	},
-	fontSizes: {
-		"xs": 12,
-		"sm": 14,
-		"base": 16,
-		"lg": 18,
-		"xl": 20,
-		"2xl": 24,
-		"3xl": 30,
-		"4xl": 36,
-		"5xl": 48,
-		"6xl": 60,
-		"7xl": 72,
-		"8xl": 96,
-		"9xl": 128
-	},
-	fontWeights: {
-		"thin": 100,
-		"extralight": 200,
-		"light": 300,
-		"normal": 400,
-		"medium": 500,
-		"semibold": 600,
-		"bold": 700,
-		"extrabold": 800,
-		"black": 900
-	},
-	lineHeights: {
-		"none": 1,
-		"tight": 1.25,
-		"snug": 1.375,
-		"normal": 1.5,
-		"relaxed": 1.625,
-		"loose": 2
-	},
-	borderRadius: {
-		"none": 0,
-		"sm": 2,
-		"DEFAULT": 4,
-		"md": 6,
-		"lg": 8,
-		"xl": 12,
-		"2xl": 16,
-		"3xl": 24,
-		"full": 9999
-	},
-	spacing: {
-		"0": 0,
-		"px": 1,
-		"0.5": 2,
-		"1": 4,
-		"1.5": 6,
-		"2": 8,
-		"2.5": 10,
-		"3": 12,
-		"3.5": 14,
-		"4": 16,
-		"5": 20,
-		"6": 24,
-		"7": 28,
-		"8": 32,
-		"9": 36,
-		"10": 40,
-		"11": 44,
-		"12": 48,
-		"14": 56,
-		"16": 64,
-		"20": 80,
-		"24": 96,
-		"28": 112,
-		"32": 128,
-		"36": 144,
-		"40": 160,
-		"44": 176,
-		"48": 192,
-		"52": 208,
-		"56": 224,
-		"60": 240,
-		"64": 256,
-		"72": 288,
-		"80": 320,
-		"96": 384
-	},
-	shadows: {
-		"sm": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
-		"DEFAULT": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
-		"md": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
-		"lg": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
-		"xl": "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
-		"2xl": "0 25px 50px -12px rgb(0 0 0 / 0.25)",
-		"inner": "inset 0 2px 4px 0 rgb(0 0 0 / 0.05)",
-		"none": "none"
-	},
-	opacities: {
-		"0": 0,
-		"5": .05,
-		"10": .1,
-		"20": .2,
-		"25": .25,
-		"30": .3,
-		"40": .4,
-		"50": .5,
-		"60": .6,
-		"70": .7,
-		"75": .75,
-		"80": .8,
-		"90": .9,
-		"95": .95,
-		"100": 1
-	}
-};
-const antdTokens = {
-	name: "Ant Design",
-	colors: {
-		"primary": "#1677ff",
-		"primary-hover": "#4096ff",
-		"primary-active": "#0958d9",
-		"primary-bg": "#e6f4ff",
-		"success": "#52c41a",
-		"success-hover": "#73d13d",
-		"success-active": "#389e0d",
-		"success-bg": "#f6ffed",
-		"warning": "#faad14",
-		"warning-hover": "#ffc53d",
-		"warning-active": "#d48806",
-		"warning-bg": "#fffbe6",
-		"error": "#ff4d4f",
-		"error-hover": "#ff7875",
-		"error-active": "#d9363e",
-		"error-bg": "#fff2f0",
-		"info": "#1677ff",
-		"text": "rgba(0, 0, 0, 0.88)",
-		"text-secondary": "rgba(0, 0, 0, 0.65)",
-		"text-tertiary": "rgba(0, 0, 0, 0.45)",
-		"text-quaternary": "rgba(0, 0, 0, 0.25)",
-		"border": "#d9d9d9",
-		"border-secondary": "#f0f0f0",
-		"fill": "rgba(0, 0, 0, 0.15)",
-		"fill-secondary": "rgba(0, 0, 0, 0.06)",
-		"fill-tertiary": "rgba(0, 0, 0, 0.04)",
-		"bg-container": "#ffffff",
-		"bg-elevated": "#ffffff",
-		"bg-spotlight": "rgba(0, 0, 0, 0.85)",
-		"white": "#ffffff",
-		"black": "#000000"
-	},
-	fontSizes: {
-		"sm": 12,
-		"base": 14,
-		"lg": 16,
-		"xl": 20,
-		"h1": 38,
-		"h2": 30,
-		"h3": 24,
-		"h4": 20,
-		"h5": 16
-	},
-	fontWeights: {
-		"normal": 400,
-		"medium": 500,
-		"semibold": 600,
-		"bold": 700
-	},
-	lineHeights: {
-		"base": 1.5714285714285714,
-		"lg": 1.5,
-		"sm": 1.6666666666666667
-	},
-	borderRadius: {
-		"xs": 2,
-		"sm": 4,
-		"base": 6,
-		"lg": 8,
-		"xl": 12,
-		"full": 9999
-	},
-	spacing: {
-		"xxs": 4,
-		"xs": 8,
-		"sm": 12,
-		"base": 16,
-		"md": 20,
-		"lg": 24,
-		"xl": 32,
-		"xxl": 48
-	},
-	shadows: {
-		"base": "0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02)",
-		"secondary": "0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 9px 28px 8px rgba(0, 0, 0, 0.05)",
-		"tertiary": "0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02)"
-	},
-	opacities: {
-		"disabled": .25,
-		"hover": .04,
-		"active": .15
-	}
-};
-const INHERITABLE_PROPERTIES = [
-	"color",
-	"fontFamily",
-	"fontSize",
-	"fontWeight",
-	"lineHeight",
-	"letterSpacing",
-	"textAlign",
-	"textDecoration"
-];
-function computeStyleHash(styles) {
-	const sortedKeys = Object.keys(styles).sort();
-	const parts = [];
-	for (const key of sortedKeys) {
-		const value = styles[key];
-		if (value !== void 0 && value !== null) parts.push(`${key}:${value}`);
-	}
-	return parts.join("|");
-}
-function extractInheritableStyles(styles) {
-	const result = {};
-	for (const prop of INHERITABLE_PROPERTIES) if (styles[prop] !== void 0) result[prop] = styles[prop];
-	return result;
-}
-function removeInheritedStyles(styles, parentStyles) {
-	if (!parentStyles) return { ...styles };
-	const result = {};
-	for (const key of Object.keys(styles)) {
-		const value = styles[key];
-		const parentValue = parentStyles[key];
-		if (INHERITABLE_PROPERTIES.includes(key) && value === parentValue) continue;
-		result[key] = value;
-	}
-	return result;
-}
-function collectStyleFingerprints(nodes) {
-	const fingerprints = /* @__PURE__ */ new Map();
-	for (const { id, styles } of nodes) {
-		const hash = computeStyleHash(styles);
-		if (fingerprints.has(hash)) {
-			const fp = fingerprints.get(hash);
-			fp.count++;
-			fp.nodeIds.push(id);
-		} else fingerprints.set(hash, {
-			hash,
-			styles,
-			count: 1,
-			nodeIds: [id]
-		});
-	}
-	return fingerprints;
-}
-var DEFAULT_OPTIONS = {
-	extractInheritable: true,
-	minRepeatCount: 2,
-	classPrefix: "st-",
-	mergeSimilar: false
-};
-function collectAllNodes(node, parentStyles, result = []) {
-	if (node.styles) result.push({
-		id: node.id,
-		styles: node.styles,
-		parentStyles
-	});
-	if (node.children) for (const child of node.children) collectAllNodes(child, node.styles, result);
-	return result;
-}
-function findMostCommonInheritableStyles(nodes) {
-	const valueCounts = {};
-	for (const { styles } of nodes) {
-		const inheritable = extractInheritableStyles(styles);
-		for (const [key, value] of Object.entries(inheritable)) {
-			if (value === void 0) continue;
-			if (!valueCounts[key]) valueCounts[key] = {};
-			const strValue = String(value);
-			valueCounts[key][strValue] = (valueCounts[key][strValue] || 0) + 1;
-		}
-	}
-	const result = {};
-	const totalNodes = nodes.length;
-	for (const [key, counts] of Object.entries(valueCounts)) {
-		let maxCount = 0;
-		let maxValue;
-		for (const [value, count] of Object.entries(counts)) if (count > maxCount) {
-			maxCount = count;
-			maxValue = value;
-		}
-		if (maxValue && maxCount > totalNodes * .3) if (key === "fontWeight" || key === "opacity") result[key] = parseFloat(maxValue);
-		else result[key] = maxValue;
-	}
-	return result;
-}
-function generateClassName(prefix, index) {
-	return `${prefix}${index}`;
-}
-function optimizeStyles(root, options = {}) {
-	const opts = {
-		...DEFAULT_OPTIONS,
-		...options
-	};
-	const allNodes = collectAllNodes(root);
-	let rootStyles = {};
-	if (opts.extractInheritable && allNodes.length > 0) rootStyles = findMostCommonInheritableStyles(allNodes);
-	const processedNodes = [];
-	for (const { id, styles, parentStyles } of allNodes) {
-		let processed = removeInheritedStyles(styles, parentStyles);
-		if (opts.extractInheritable) {
-			for (const [key, value] of Object.entries(rootStyles)) if (processed[key] === value) delete processed[key];
-		}
-		if (Object.keys(processed).length > 0) processedNodes.push({
-			id,
-			styles: processed
-		});
-	}
-	const fingerprints = collectStyleFingerprints(processedNodes);
-	const sharedClasses = /* @__PURE__ */ new Map();
-	const nodeClasses = /* @__PURE__ */ new Map();
-	const nodeUniqueStyles = /* @__PURE__ */ new Map();
-	const hashToClassName = /* @__PURE__ */ new Map();
-	let classIndex = 0;
-	for (const [hash, fp] of fingerprints.entries()) if (fp.count >= opts.minRepeatCount) {
-		const className = generateClassName(opts.classPrefix, classIndex++);
-		sharedClasses.set(className, fp.styles);
-		hashToClassName.set(hash, className);
-		for (const nodeId of fp.nodeIds) {
-			if (!nodeClasses.has(nodeId)) nodeClasses.set(nodeId, []);
-			nodeClasses.get(nodeId).push(className);
-		}
-	} else for (const nodeId of fp.nodeIds) nodeUniqueStyles.set(nodeId, fp.styles);
-	return {
-		rootStyles,
-		sharedClasses,
-		nodeClasses,
-		nodeUniqueStyles
-	};
-}
-function generateOptimizedCss(optimized) {
-	const lines = [];
-	if (Object.keys(optimized.rootStyles).length > 0) {
-		lines.push(":root, body {");
-		for (const [key, value] of Object.entries(optimized.rootStyles)) {
-			const cssKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
-			lines.push(`  ${cssKey}: ${value};`);
-		}
-		lines.push("}");
-		lines.push("");
-	}
-	for (const [className, styles] of optimized.sharedClasses.entries()) {
-		lines.push(`.${className} {`);
-		for (const [key, value] of Object.entries(styles)) if (value !== void 0) {
-			const cssKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
-			lines.push(`  ${cssKey}: ${value};`);
-		}
-		lines.push("}");
-		lines.push("");
-	}
-	return lines.join("\n");
-}
-function getNodeOptimizedStyle(nodeId, optimized) {
-	const classes = optimized.nodeClasses.get(nodeId) || [];
-	const unique = optimized.nodeUniqueStyles.get(nodeId);
-	let uniqueStyle;
-	if (unique && Object.keys(unique).length > 0) {
-		const parts = [];
-		for (const [key, value] of Object.entries(unique)) if (value !== void 0) {
-			const cssKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
-			parts.push(`${cssKey}: ${value}`);
-		}
-		uniqueStyle = parts.join("; ");
-	}
-	return {
-		classes,
-		uniqueStyle
-	};
 }
 function hasVisibleFill(fills) {
 	if (!fills || fills.length === 0) return false;
@@ -3944,6 +3856,7 @@ function extractStyles(node) {
 			height: node.height,
 			baselineCount: Array.isArray(node.textData?.baselines) ? node.textData.baselines.length : void 0,
 			lineHeight: node.lineHeight,
+			textAlignHorizontal: node.textAlignHorizontal,
 			characters: node.characters,
 			textData: node.textData,
 			fills: node.fills
@@ -3965,1317 +3878,9 @@ function applyStylesToTree(root) {
 	};
 	return processNode$1(root);
 }
-function stylesToInlineString(styles) {
-	const parts = [];
-	if (styles.background) parts.push(`background: ${styles.background}`);
-	if (styles.border) parts.push(`border: ${styles.border}`);
-	if (styles.borderRadius) parts.push(`border-radius: ${styles.borderRadius}`);
-	if (styles.boxShadow) parts.push(`box-shadow: ${styles.boxShadow}`);
-	if (typeof styles.opacity === "number") parts.push(`opacity: ${styles.opacity}`);
-	if (styles.color) parts.push(`color: ${styles.color}`);
-	if (styles.fontFamily) parts.push(`font-family: ${styles.fontFamily}`);
-	if (styles.fontSize) parts.push(`font-size: ${styles.fontSize}`);
-	if (styles.fontWeight) parts.push(`font-weight: ${styles.fontWeight}`);
-	if (styles.lineHeight) parts.push(`line-height: ${styles.lineHeight}`);
-	if (styles.letterSpacing) parts.push(`letter-spacing: ${styles.letterSpacing}`);
-	if (styles.textDecoration) parts.push(`text-decoration: ${styles.textDecoration}`);
-	return parts.join("; ");
+function isNewDslFormat(data) {
+	return data && typeof data === "object" && data.meta && typeof data.meta.version === "string" && Array.isArray(data.content);
 }
-const DEFAULT_COMPRESS_OPTIONS = {
-	simplifyId: false,
-	removeCoordinates: true,
-	removeName: true,
-	keepImageName: true,
-	keepAllName: true,
-	omitDefaults: true,
-	convertColors: true,
-	removeUnits: true,
-	minify: true
-};
-function rgbToHex(color) {
-	if (!color) return color;
-	if (color.startsWith("#")) return color;
-	const rgbMatch = color.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
-	if (rgbMatch) {
-		const [, r, g, b] = rgbMatch;
-		return rgbComponentsToHex(parseInt(r), parseInt(g), parseInt(b));
-	}
-	const rgbaMatch = color.match(/rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)/);
-	if (rgbaMatch) {
-		const [, r, g, b, a] = rgbaMatch;
-		const alpha = parseFloat(a);
-		if (alpha >= .99) return rgbComponentsToHex(parseInt(r), parseInt(g), parseInt(b));
-		return rgbComponentsToHex(parseInt(r), parseInt(g), parseInt(b), alpha);
-	}
-	return color;
-}
-function rgbComponentsToHex(r, g, b, a) {
-	const toHex = (n) => n.toString(16).padStart(2, "0");
-	const hex = `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-	if (canSimplifyHex(hex)) return `#${hex[1]}${hex[3]}${hex[5]}`;
-	if (a !== void 0 && a < 1) return hex + toHex(Math.round(a * 255));
-	return hex;
-}
-function canSimplifyHex(hex) {
-	return hex[1] === hex[2] && hex[3] === hex[4] && hex[5] === hex[6];
-}
-function extractNumber(value) {
-	if (value === void 0 || value === null) return void 0;
-	if (typeof value === "number") return value;
-	const match = value.match(/^([\d.]+)/);
-	if (match) {
-		const num = parseFloat(match[1]);
-		return Number.isInteger(num) ? num : num;
-	}
-}
-function simplifyBorderRadius(value) {
-	if (!value) return void 0;
-	const numbers = value.match(/[\d.]+/g);
-	if (!numbers) return void 0;
-	if (numbers.length === 1) return parseFloat(numbers[0]);
-	if (numbers.length === 4) {
-		const nums = numbers.map((n) => parseFloat(n));
-		if (nums.every((n) => n === nums[0])) return nums[0];
-		return nums.join(" ");
-	}
-	return value;
-}
-function simplifyJustify(value) {
-	if (!value || value === "flex-start") return void 0;
-	return {
-		"flex-end": "end",
-		"space-between": "between",
-		"space-around": "around",
-		"space-evenly": "evenly"
-	}[value] || value;
-}
-function simplifyAlign(value) {
-	if (!value || value === "flex-start") return void 0;
-	return { "flex-end": "end" }[value] || value;
-}
-function isEmptyObject(obj) {
-	if (!obj) return true;
-	return Object.keys(obj).length === 0;
-}
-var idCounter = 0;
-var idMap = /* @__PURE__ */ new Map();
-function compressDSL(node, options) {
-	const opts = {
-		...DEFAULT_COMPRESS_OPTIONS,
-		...options
-	};
-	if (opts.simplifyId) {
-		idCounter = 0;
-		idMap.clear();
-	}
-	return compressNode(node, opts);
-}
-function compressNode(node, opts) {
-	const result = {
-		id: getCompressedId(node.id, opts),
-		type: node.type,
-		w: node.width,
-		h: node.height
-	};
-	if (shouldKeepName(node, opts)) result.name = node.name;
-	if (node.type === "TEXT" && node.characters) result.text = node.characters;
-	if (node.imageRole) result.role = node.imageRole === "background" ? "bg" : "img";
-	const layout = compressLayout(node.layout, opts);
-	if (!isEmptyObject(layout)) result.layout = layout;
-	const styles = compressStyles(node.styles, opts);
-	if (!isEmptyObject(styles)) result.styles = styles;
-	if (node.children && node.children.length > 0) result.children = node.children.map((child) => compressNode(child, opts));
-	return result;
-}
-function getCompressedId(id, opts) {
-	if (!opts.simplifyId) return id;
-	if (!idMap.has(id)) idMap.set(id, ++idCounter);
-	return idMap.get(id);
-}
-function compressLayout(layout, opts) {
-	if (!layout) return void 0;
-	const result = {};
-	if (layout.flexDirection) result.direction = layout.flexDirection;
-	if (layout.flexWrap === "wrap") result.wrap = true;
-	const justify = opts.omitDefaults ? simplifyJustify(layout.justifyContent) : layout.justifyContent;
-	if (justify) result.justify = justify;
-	const align = opts.omitDefaults ? simplifyAlign(layout.alignItems) : layout.alignItems;
-	if (align) result.align = align;
-	if (layout.gap && layout.gap > 0) result.gap = layout.gap;
-	if (layout.paddingTop && layout.paddingTop > 0) result.pt = layout.paddingTop;
-	if (layout.paddingRight && layout.paddingRight > 0) result.pr = layout.paddingRight;
-	if (layout.paddingBottom && layout.paddingBottom > 0) result.pb = layout.paddingBottom;
-	if (layout.paddingLeft && layout.paddingLeft > 0) result.pl = layout.paddingLeft;
-	if (layout.marginTop && layout.marginTop > 0) result.mt = layout.marginTop;
-	if (layout.marginRight && layout.marginRight > 0) result.mr = layout.marginRight;
-	if (layout.marginBottom && layout.marginBottom > 0) result.mb = layout.marginBottom;
-	if (layout.marginLeft && layout.marginLeft > 0) result.ml = layout.marginLeft;
-	return result;
-}
-function compressStyles(styles, opts) {
-	if (!styles) return void 0;
-	const result = {};
-	if (styles.background) result.bg = opts.convertColors ? rgbToHex(styles.background) : styles.background;
-	if (styles.border) result.border = opts.convertColors ? convertBorderColor(styles.border) : styles.border;
-	if (styles.borderRadius) result.radius = opts.removeUnits ? simplifyBorderRadius(styles.borderRadius) : styles.borderRadius;
-	if (styles.boxShadow) result.shadow = opts.convertColors ? convertShadowColor(styles.boxShadow) : styles.boxShadow;
-	if (styles.opacity !== void 0 && styles.opacity < 1) result.opacity = styles.opacity;
-	if (styles.color) result.color = opts.convertColors ? rgbToHex(styles.color) : styles.color;
-	if (styles.fontFamily) result.font = styles.fontFamily;
-	if (styles.fontSize) result.size = opts.removeUnits ? extractNumber(styles.fontSize) : void 0;
-	if (styles.fontWeight) result.weight = styles.fontWeight;
-	if (styles.lineHeight) result.leading = extractNumber(styles.lineHeight);
-	if (styles.letterSpacing) {
-		const spacing = extractNumber(styles.letterSpacing);
-		if (spacing && spacing !== 0) result.spacing = spacing;
-	}
-	if (styles.textAlign && styles.textAlign !== "left") result.textAlign = styles.textAlign;
-	return result;
-}
-function convertBorderColor(border) {
-	return border.replace(/rgb\([^)]+\)/g, (match) => rgbToHex(match));
-}
-function convertShadowColor(shadow) {
-	return shadow.replace(/rgba?\([^)]+\)/g, (match) => rgbToHex(match));
-}
-function shouldKeepName(node, opts) {
-	if (opts.keepAllName) return true;
-	if (opts.keepImageName) return [
-		"ICON",
-		"IMAGE",
-		"VECTOR"
-	].includes(node.type);
-	return false;
-}
-function getCompressionStats(original, compressed, minify = true) {
-	const originalJson = JSON.stringify(original, null, minify ? 0 : 2);
-	const compressedJson = JSON.stringify(compressed, null, minify ? 0 : 2);
-	const originalSize = new TextEncoder().encode(originalJson).length;
-	const compressedSize = new TextEncoder().encode(compressedJson).length;
-	const nodeCount = countNodes(original);
-	const originalTokens = Math.ceil(originalJson.length / 4);
-	const compressedTokens = Math.ceil(compressedJson.length / 4);
-	const savedBytes = originalSize - compressedSize;
-	const savedPercent = (savedBytes / originalSize * 100).toFixed(1);
-	return {
-		original: {
-			size: originalSize,
-			sizeKB: (originalSize / 1024).toFixed(2),
-			nodeCount,
-			estimatedTokens: originalTokens
-		},
-		compressed: {
-			size: compressedSize,
-			sizeKB: (compressedSize / 1024).toFixed(2),
-			estimatedTokens: compressedTokens
-		},
-		savings: {
-			bytes: savedBytes,
-			percent: `${savedPercent}%`,
-			tokens: originalTokens - compressedTokens
-		}
-	};
-}
-function countNodes(node) {
-	let count = 1;
-	if (node.children) for (const child of node.children) count += countNodes(child);
-	return count;
-}
-function toJsonString(node, minify = true) {
-	return JSON.stringify(node, null, minify ? 0 : 2);
-}
-function printStats(stats) {
-	console.log("📊 AI DSL 压缩统计");
-	console.log("================");
-	console.log(`节点数量: ${stats.original.nodeCount}`);
-	console.log("");
-	console.log("原始大小:");
-	console.log(`  - ${stats.original.sizeKB} KB (${stats.original.size} bytes)`);
-	console.log(`  - 估算 token: ~${stats.original.estimatedTokens}`);
-	console.log("");
-	console.log("压缩后:");
-	console.log(`  - ${stats.compressed.sizeKB} KB (${stats.compressed.size} bytes)`);
-	console.log(`  - 估算 token: ~${stats.compressed.estimatedTokens}`);
-	console.log("");
-	console.log("节省:");
-	console.log(`  - ${stats.savings.percent} (${stats.savings.bytes} bytes)`);
-	console.log(`  - ~${stats.savings.tokens} tokens`);
-}
-function computeFingerprint(styles) {
-	if (styles.length === 0) return "";
-	const str = [...styles].sort().join("|");
-	let hash = 0;
-	for (let i = 0; i < str.length; i++) {
-		const char = str.charCodeAt(i);
-		hash = (hash << 5) - hash + char;
-		hash = hash & hash;
-	}
-	return Math.abs(hash).toString(16).padStart(8, "0");
-}
-function generateSharedClassName(fingerprint, _index) {
-	return `s-${fingerprint.slice(0, 6)}`;
-}
-function deduplicateStyles(entries, minSharedCount = 2) {
-	const sharedClasses = [];
-	const nodeClassMap = /* @__PURE__ */ new Map();
-	const uniqueStyles = /* @__PURE__ */ new Map();
-	const groups = /* @__PURE__ */ new Map();
-	for (const entry of entries) {
-		if (!entry.fingerprint) continue;
-		const group = groups.get(entry.fingerprint) || [];
-		group.push(entry);
-		groups.set(entry.fingerprint, group);
-	}
-	const usedClassNames = /* @__PURE__ */ new Set();
-	for (const [fingerprint, group] of groups) if (group.length >= minSharedCount) {
-		let className = generateSharedClassName(fingerprint, sharedClasses.length);
-		while (usedClassNames.has(className)) className = `${className}-${sharedClasses.length}`;
-		usedClassNames.add(className);
-		sharedClasses.push({
-			className,
-			styles: group[0].styles,
-			nodeIds: group.map((e) => e.nodeId)
-		});
-		for (const entry of group) nodeClassMap.set(entry.nodeId, [className]);
-	} else for (const entry of group) {
-		nodeClassMap.set(entry.nodeId, [entry.nodeClass]);
-		uniqueStyles.set(entry.nodeId, entry.styles);
-	}
-	return {
-		sharedClasses,
-		nodeClassMap,
-		uniqueStyles
-	};
-}
-function generateSharedCss(sharedClasses) {
-	if (sharedClasses.length === 0) return "";
-	return `/* 共享样式类 */\n${sharedClasses.map((sc) => {
-		const body = sc.styles.map((s) => `  ${s};`).join("\n");
-		return `.${sc.className} {\n${body}\n}`;
-	}).join("\n\n")}`;
-}
-function createStyleEntry(nodeId, nodeClass, styles) {
-	return {
-		nodeId,
-		nodeClass,
-		styles,
-		fingerprint: computeFingerprint(styles)
-	};
-}
-var NAME_TAG_RULES = [
-	{
-		exact: [
-			"button",
-			"btn",
-			"按钮"
-		],
-		contains: ["button", "btn"],
-		tag: "button",
-		extraClass: "btn"
-	},
-	{
-		exact: ["card", "卡片"],
-		startsWith: ["卡片"],
-		tag: "article",
-		extraClass: "card"
-	},
-	{
-		exact: [
-			"link",
-			"链接",
-			"常用链接"
-		],
-		tag: "a",
-		extraClass: "link"
-	}
-];
-function inferTagFromName(name) {
-	if (!name) return null;
-	const lowerName = name.toLowerCase().trim();
-	for (const rule of NAME_TAG_RULES) {
-		if (rule.exact) {
-			for (const keyword of rule.exact) if (lowerName === keyword.toLowerCase()) return {
-				tag: rule.tag,
-				role: rule.role,
-				extraClass: rule.extraClass
-			};
-		}
-		if (rule.startsWith) {
-			for (const keyword of rule.startsWith) if (lowerName.startsWith(keyword.toLowerCase())) return {
-				tag: rule.tag,
-				role: rule.role,
-				extraClass: rule.extraClass
-			};
-		}
-		if (rule.contains) {
-			for (const keyword of rule.contains) if (keyword.match(/^[a-z]+$/i)) {
-				if (new RegExp(`(^|[^a-z])${keyword}([^a-z]|$)`, "i").test(lowerName)) return {
-					tag: rule.tag,
-					role: rule.role,
-					extraClass: rule.extraClass
-				};
-			}
-		}
-	}
-	return null;
-}
-function inferTagFromType(node) {
-	switch (node.type) {
-		case "TEXT": return {
-			tag: "span",
-			extraClass: "text"
-		};
-		case "ICON": return {
-			tag: "span",
-			extraClass: "icon",
-			role: "img"
-		};
-		case "IMAGE": return {
-			tag: "img",
-			role: "img"
-		};
-		case "VECTOR": return {
-			tag: "span",
-			extraClass: "vector",
-			role: "img"
-		};
-		case "INSTANCE":
-		case "VIRTUAL_GROUP":
-		case "FRAME":
-		case "GROUP":
-		default: return { tag: "div" };
-	}
-}
-function inferTag(node) {
-	const nameInference = inferTagFromName(node.name);
-	if (nameInference) return nameInference;
-	return inferTagFromType(node);
-}
-function isSelfClosingTag(tag) {
-	return [
-		"img",
-		"input",
-		"br",
-		"hr",
-		"meta",
-		"link"
-	].includes(tag);
-}
-function removeRedundantNesting(node) {
-	if (node.children && node.children.length > 0) node = {
-		...node,
-		children: node.children.map((child) => removeRedundantNesting(child))
-	};
-	if (node.children && node.children.length === 1 && node.children[0].children && node.children[0].children.length > 0) {
-		const child = node.children[0];
-		const sameSize = Math.abs(node.width - child.width) < 2 && Math.abs(node.height - child.height) < 2;
-		const isVirtualGroup = child.type === "VIRTUAL_GROUP";
-		if (sameSize && isVirtualGroup) return {
-			...node,
-			layout: child.layout || node.layout,
-			children: child.children
-		};
-	}
-	return node;
-}
-function escapeHtml(input) {
-	return input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-function sanitizeClassName(value) {
-	return value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-}
-function nodeIdToClass(nodeId) {
-	return `id-${nodeId.replace(/[^a-zA-Z0-9]/g, "-")}`;
-}
-function buildClassNames(node, classMode, debugMode = false) {
-	const hasChildren = node.children && node.children.length > 0;
-	const classes = [];
-	if (debugMode) {
-		classes.push("layout-node", hasChildren ? "is-container" : "is-leaf", `type-${node.type.toLowerCase()}`);
-		if (node.id) classes.push(nodeIdToClass(node.id));
-	} else {
-		classes.push("layout-node");
-		const hasExplicitVisualStyles = !!(node.styles?.background || node.styles?.border || node.styles?.borderRadius);
-		if (node.mask !== true && !hasExplicitVisualStyles) {
-			if (node.type === "IMAGE") classes.push("type-image");
-			else if (node.type === "ICON") classes.push("type-icon");
-			else if (node.type === "VECTOR") classes.push("type-vector");
-		}
-	}
-	if (classMode === "tailwind") {
-		if (node.layout?.display === "flex") {
-			const direction = node.layout.flexDirection === "row" || !node.layout.flexDirection ? "row" : "col";
-			const alignItems = node.layout.alignItems || "flex-start";
-			let alignSuffix = "start";
-			if (alignItems === "center") alignSuffix = "center";
-			else if (alignItems === "flex-end") alignSuffix = "end";
-			classes.push(`flex-${direction}-${alignSuffix}`);
-			const justify = node.layout.justifyContent;
-			if (justify === "center") classes.push("justify-center");
-			else if (justify === "flex-end") classes.push("justify-end");
-			else if (justify === "space-between") classes.push("justify-between");
-		}
-	} else classes.push("layout-box");
-	return classes;
-}
-function formatScaleClass(scale) {
-	return `scale-${String(scale).replace(".", "_")}`;
-}
-function shouldUseSpaceBetween(node, spacingAnalysis) {
-	if (!spacingAnalysis || !node.children || node.children.length !== 2) return false;
-	if (!(node.layout?.flexDirection === "row" || !node.layout?.flexDirection)) return false;
-	if (!spacingAnalysis.useGap || spacingAnalysis.gap <= 0) return false;
-	const justify = node.layout?.justifyContent;
-	if (justify && justify !== "flex-start") return false;
-	const parentWidth = typeof node.width === "number" ? node.width : 0;
-	if (parentWidth <= 0) return false;
-	const { left, right } = spacingAnalysis.padding;
-	if (left > 1 || right > 1) return false;
-	const sorted = [...node.children].sort((a, b) => a.x - b.x);
-	const leftWidth = getEffectiveBounds(sorted[0]).width;
-	const rightWidth = getEffectiveBounds(sorted[1]).width;
-	const expectedGap = parentWidth - left - right - leftWidth - rightWidth;
-	return Math.abs(expectedGap - spacingAnalysis.gap) <= 2;
-}
-function collectStyleParts(node, isRoot, spacingAnalysis, parentCtx) {
-	const parts = [];
-	const isLeaf = !node.children || node.children.length === 0;
-	const isGraphic = [
-		"IMAGE",
-		"ICON",
-		"RECTANGLE",
-		"ELLIPSE",
-		"LINE",
-		"POLYGON",
-		"STAR",
-		"VECTOR",
-		"PATH"
-	].includes(node.type);
-	const isText = node.type === "TEXT";
-	const hasVisualStyles = !!(node.styles?.background || node.styles?.border || node.styles?.borderRadius);
-	const addDimensions = () => {
-		if (typeof node.width === "number" && node.width > 0) parts.push(`width: ${node.width}px`);
-		if (typeof node.height === "number" && node.height > 0) parts.push(`height: ${node.height}px`);
-	};
-	if (isRoot) addDimensions();
-	else if (isGraphic) addDimensions();
-	else if (isText) {
-		const baselines = node.textData?.baselines;
-		const baselineCount = Array.isArray(baselines) ? baselines.length : 0;
-		const hasBaselineInfo = baselineCount > 0;
-		const isMultiLineByBaseline = hasBaselineInfo && baselineCount > 1;
-		let isMultiLineByHeight = false;
-		if (!hasBaselineInfo) {
-			const singleLineHeight = parseFloat(node.styles?.fontSize || "14px") * parseFloat(node.styles?.lineHeight || "1.5");
-			isMultiLineByHeight = !!(node.height && node.height > singleLineHeight + 1);
-		}
-		if (isMultiLineByBaseline || isMultiLineByHeight) {
-			if (typeof node.width === "number" && node.width > 0) parts.push(`width: ${node.width}px`);
-		}
-	} else if (isLeaf) addDimensions();
-	else if (hasVisualStyles) addDimensions();
-	const layoutGap = node.layout?.gap;
-	const hasLayoutGap = typeof layoutGap === "number" && layoutGap > 0;
-	const hasLayoutPadding = typeof node.layout?.paddingTop === "number" || typeof node.layout?.paddingRight === "number" || typeof node.layout?.paddingBottom === "number" || typeof node.layout?.paddingLeft === "number";
-	if (hasLayoutGap || hasLayoutPadding) {
-		if (hasLayoutGap) parts.push(`gap: ${layoutGap}px`);
-		const pt = node.layout?.paddingTop ?? 0;
-		const pr = node.layout?.paddingRight ?? 0;
-		const pb = node.layout?.paddingBottom ?? 0;
-		const pl = node.layout?.paddingLeft ?? 0;
-		const padParts = [
-			pt > 0 ? `${pt}px` : "0",
-			pr > 0 ? `${pr}px` : "0",
-			pb > 0 ? `${pb}px` : "0",
-			pl > 0 ? `${pl}px` : "0"
-		];
-		if (padParts.some((p) => p !== "0")) parts.push(`padding: ${padParts.join(" ")}`);
-	} else if (spacingAnalysis) {
-		const { useGap, gap, padding } = spacingAnalysis;
-		const useSpaceBetween = shouldUseSpaceBetween(node, spacingAnalysis);
-		const gapRound = Math.round(gap);
-		if (useSpaceBetween) {
-			if (!parts.some((p) => p.startsWith("width:")) && typeof node.width === "number" && node.width > 0) parts.push(`width: ${node.width}px`);
-			parts.push("justify-content: space-between");
-		} else if (useGap && gapRound > 0) parts.push(`gap: ${gapRound}px`);
-		const padParts = [];
-		const pt = Math.round(padding.top);
-		const pr = Math.round(padding.right);
-		const pb = Math.round(padding.bottom);
-		const pl = Math.round(padding.left);
-		if (pt > 0) padParts.push(`${pt}px`);
-		else padParts.push("0");
-		if (pr > 0) padParts.push(`${pr}px`);
-		else padParts.push("0");
-		if (pb > 0) padParts.push(`${pb}px`);
-		else padParts.push("0");
-		if (pl > 0) padParts.push(`${pl}px`);
-		else padParts.push("0");
-		if (padParts.some((p) => p !== "0")) parts.push(`padding: ${padParts.join(" ")}`);
-	}
-	if (parentCtx) {
-		const hasLayoutMarginTop = typeof node.layout?.marginTop === "number";
-		const hasLayoutMarginLeft = typeof node.layout?.marginLeft === "number";
-		let mt = hasLayoutMarginTop ? Math.round(node.layout.marginTop) : 0;
-		let ml = hasLayoutMarginLeft ? Math.round(node.layout.marginLeft) : 0;
-		if (!hasLayoutMarginTop || !hasLayoutMarginLeft) {
-			const pUseGap = typeof parentCtx.parent.layout?.gap === "number" && parentCtx.parent.layout.gap > 0 || (parentCtx.useGap ?? false);
-			const pGap = typeof parentCtx.parent.layout?.gap === "number" ? parentCtx.parent.layout.gap : parentCtx.gap ?? 0;
-			const pPadding = {
-				top: parentCtx.parent.layout?.paddingTop ?? parentCtx.padding?.top ?? 0,
-				right: parentCtx.parent.layout?.paddingRight ?? parentCtx.padding?.right ?? 0,
-				bottom: parentCtx.parent.layout?.paddingBottom ?? parentCtx.padding?.bottom ?? 0,
-				left: parentCtx.parent.layout?.paddingLeft ?? parentCtx.padding?.left ?? 0
-			};
-			const margins = calcChildMargins(node, parentCtx.parent, parentCtx.prevSibling, parentCtx.isRow, pUseGap, pGap, pPadding, parentCtx.alignItems);
-			if (!hasLayoutMarginTop) mt = Math.round(margins.marginTop);
-			if (!hasLayoutMarginLeft) ml = Math.round(margins.marginLeft);
-		}
-		if (mt !== 0) parts.push(`margin-top: ${mt}px`);
-		if (ml !== 0) parts.push(`margin-left: ${ml}px`);
-	}
-	if (node.styles) {
-		for (const [key, value] of Object.entries(node.styles)) if (value !== void 0 && value !== null) {
-			const cssKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
-			parts.push(`${cssKey}: ${value}`);
-		}
-	}
-	return parts;
-}
-function collectAllStyles(node, isRoot, path, parentCtx, entries, contexts) {
-	const hasChildren = node.children && node.children.length > 0;
-	const nodeId = node.id || `node-${path}`;
-	const nodeClass = `n-${sanitizeClassName(nodeId)}`;
-	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
-	const sortedChildren = hasChildren ? [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y) : [];
-	const spacingAnalysis = hasChildren ? analyzeChildSpacing(node, sortedChildren, isRow) : void 0;
-	const styles = collectStyleParts(node, isRoot, spacingAnalysis, parentCtx);
-	entries.push(createStyleEntry(nodeId, nodeClass, styles));
-	contexts.push({
-		node,
-		nodeId,
-		nodeClass,
-		isRoot,
-		spacingAnalysis,
-		parentCtx,
-		path
-	});
-	if (hasChildren) {
-		const childCtxBase = {
-			parent: node,
-			useGap: spacingAnalysis?.useGap ?? false,
-			gap: spacingAnalysis?.gap ?? 0,
-			padding: {
-				top: spacingAnalysis?.padding?.top ?? 0,
-				right: spacingAnalysis?.padding?.right ?? 0,
-				bottom: spacingAnalysis?.padding?.bottom ?? 0,
-				left: spacingAnalysis?.padding?.left ?? 0
-			},
-			isRow,
-			alignItems: node.layout?.alignItems
-		};
-		sortedChildren.forEach((child, index) => {
-			const prev = index > 0 ? sortedChildren[index - 1] : null;
-			const childCtx = {
-				...childCtxBase,
-				prevSibling: prev
-			};
-			collectAllStyles(child, false, `${path}-${index}`, childCtx, entries, contexts);
-		});
-	}
-}
-function renderNodeWithDedup(node, _isRoot, includeLabels, classMode, debugMode, dedupResult, path, _parentCtx, semanticTags = true, includeNodeId = true, includeNodeName = false) {
-	const hasChildren = node.children && node.children.length > 0;
-	const nodeId = node.id || `node-${path}`;
-	const tagInfo = semanticTags ? inferTag(node) : { tag: "div" };
-	const tag = tagInfo.tag;
-	const baseClasses = buildClassNames(node, classMode, debugMode);
-	if (tagInfo.extraClass) baseClasses.push(tagInfo.extraClass);
-	const allClasses = [...dedupResult.nodeClassMap.get(nodeId) || [], ...baseClasses].join(" ");
-	const label = includeLabels ? `<span class="layout-label">${escapeHtml(node.name || node.type)}</span>` : "";
-	let content = "";
-	if (node.characters) content = escapeHtml(node.characters);
-	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
-	const dataNodeId = includeNodeId && nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
-	const dataName = includeNodeName && node.name ? ` data-name="${escapeHtml(node.name)}"` : "";
-	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
-	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
-	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses}"${dataNodeId}${dataName}${dataType}${roleAttr}${altAttr} />`;
-	if (!hasChildren) return `<${tag} class="${allClasses}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${content}</${tag}>`;
-	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
-	const sortedChildren = [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y);
-	const spacingAnalysis = analyzeChildSpacing(node, sortedChildren, isRow);
-	const childCtxBase = {
-		parent: node,
-		useGap: spacingAnalysis?.useGap ?? false,
-		gap: spacingAnalysis?.gap ?? 0,
-		padding: {
-			top: spacingAnalysis?.padding?.top ?? 0,
-			right: spacingAnalysis?.padding?.right ?? 0,
-			bottom: spacingAnalysis?.padding?.bottom ?? 0,
-			left: spacingAnalysis?.padding?.left ?? 0
-		},
-		isRow,
-		alignItems: node.layout?.alignItems
-	};
-	return `<${tag} class="${allClasses}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${sortedChildren.map((child, index) => {
-		const prev = index > 0 ? sortedChildren[index - 1] : null;
-		const childCtx = {
-			...childCtxBase,
-			prevSibling: prev
-		};
-		return renderNodeWithDedup(child, false, includeLabels, classMode, debugMode, dedupResult, `${path}-${index}`, childCtx, semanticTags, includeNodeId, includeNodeName);
-	}).join("")}</${tag}>`;
-}
-function generateUniqueCssRules(dedupResult) {
-	const rules = [];
-	for (const [nodeId, styles] of dedupResult.uniqueStyles) {
-		if (styles.length === 0) continue;
-		const classNames = dedupResult.nodeClassMap.get(nodeId);
-		if (!classNames) continue;
-		const nodeClass = classNames.find((c) => c.startsWith("n-"));
-		if (!nodeClass) continue;
-		const body = styles.map((s) => `  ${s};`).join("\n");
-		rules.push(`.${nodeClass} {\n${body}\n}`);
-	}
-	return rules.join("\n\n");
-}
-function renderNode(node, isRoot, includeLabels, classMode, debugMode, cssRules, path, parentCtx, semanticTags = true, includeNodeId = true, includeNodeName = false) {
-	const hasChildren = node.children && node.children.length > 0;
-	const isRow = node.layout?.flexDirection === "row" || !node.layout?.flexDirection;
-	const sortedChildren = hasChildren ? [...node.children].sort((a, b) => isRow ? a.x - b.x : a.y - b.y) : [];
-	const spacingAnalysis = hasChildren ? analyzeChildSpacing(node, sortedChildren, isRow) : void 0;
-	const tagInfo = semanticTags ? inferTag(node) : { tag: "div" };
-	const tag = tagInfo.tag;
-	const styleParts = collectStyleParts(node, isRoot, spacingAnalysis, parentCtx);
-	const hasStyles = styleParts.length > 0;
-	const baseClasses = buildClassNames(node, classMode, debugMode);
-	if (tagInfo.extraClass) baseClasses.push(tagInfo.extraClass);
-	const allClasses = [...baseClasses];
-	const nodeId = node.id || `node-${path}`;
-	if (hasStyles) {
-		const nodeClass = `n-${sanitizeClassName(nodeId)}`;
-		allClasses.unshift(nodeClass);
-		const cssBody = styleParts.map((p) => `  ${p};`).join("\n");
-		cssRules.push(`.${nodeClass} {\n${cssBody}\n}`);
-	}
-	const label = includeLabels ? `<span class="layout-label">${escapeHtml(node.name || node.type)}</span>` : "";
-	let content = "";
-	if (node.characters) content = escapeHtml(node.characters);
-	const dataType = debugMode ? ` data-type="${escapeHtml(node.type)}"` : "";
-	const dataNodeId = includeNodeId && nodeId ? ` data-node-id="${escapeHtml(nodeId)}"` : "";
-	const dataName = includeNodeName && node.name ? ` data-name="${escapeHtml(node.name)}"` : "";
-	if (debugMode && node.id) allClasses.push(nodeIdToClass(node.id));
-	const roleAttr = tagInfo.role ? ` role="${tagInfo.role}"` : "";
-	const altAttr = tag === "img" ? ` alt="${escapeHtml(node.name || "")}"` : "";
-	if (isSelfClosingTag(tag)) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataName}${dataType}${roleAttr}${altAttr} />`;
-	if (!hasChildren) return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${content}</${tag}>`;
-	const childCtxBase = {
-		parent: node,
-		useGap: spacingAnalysis?.useGap ?? false,
-		gap: spacingAnalysis?.gap ?? 0,
-		padding: {
-			top: spacingAnalysis?.padding?.top ?? 0,
-			right: spacingAnalysis?.padding?.right ?? 0,
-			bottom: spacingAnalysis?.padding?.bottom ?? 0,
-			left: spacingAnalysis?.padding?.left ?? 0
-		},
-		isRow,
-		alignItems: node.layout?.alignItems
-	};
-	const childrenHtml = sortedChildren.map((child, index) => {
-		const prev = index > 0 ? sortedChildren[index - 1] : null;
-		const childCtx = {
-			...childCtxBase,
-			prevSibling: prev
-		};
-		return renderNode(child, false, includeLabels, classMode, debugMode, cssRules, `${path}-${index}`, childCtx, semanticTags, includeNodeId, includeNodeName);
-	}).join("");
-	return `<${tag} class="${allClasses.join(" ")}"${dataNodeId}${dataName}${dataType}${roleAttr}>${label}${childrenHtml}</${tag}>`;
-}
-function renderLayoutToHtml(node, options = {}) {
-	const { scale = 1, rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, semanticTags = true, includeNodeId = true, includeNodeName = false } = options;
-	return `<div class="${rootClassName} ${formatScaleClass(scale)}">${renderNode(removeRedundantNesting(node), true, includeLabels, classMode, debugMode, [], "0", void 0, semanticTags, includeNodeId, includeNodeName)}</div>`;
-}
-function renderNodeAbsolute(node, isRoot, includeLabels, cssRules, path, parentX, parentY) {
-	const hasChildren = node.children && node.children.length > 0;
-	const nodeClass = `abs-${sanitizeClassName(node.id || `${node.name || "node"}-${path}` || `node-${path}`)}`;
-	const relX = node.x - parentX;
-	const relY = node.y - parentY;
-	const styleParts = [];
-	if (isRoot) styleParts.push("position:relative");
-	else {
-		styleParts.push("position:absolute");
-		styleParts.push(`left:${relX}px`);
-		styleParts.push(`top:${relY}px`);
-	}
-	if (typeof node.width === "number" && node.width > 0) styleParts.push(`width:${node.width}px`);
-	if (typeof node.height === "number" && node.height > 0) styleParts.push(`height:${node.height}px`);
-	if (node.styles) {
-		for (const [key, value] of Object.entries(node.styles)) if (value !== void 0 && value !== null) {
-			const cssKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
-			styleParts.push(`${cssKey}:${value}`);
-		}
-	}
-	cssRules.push(`.abs-node.${nodeClass}{${styleParts.join(";")}}`);
-	const classes = [
-		"abs-node",
-		hasChildren ? "is-container" : "is-leaf",
-		`type-${node.type.toLowerCase()}`,
-		nodeClass
-	].join(" ");
-	const label = includeLabels ? `<div class="abs-label">${escapeHtml(node.name || node.type)}</div>` : "";
-	let content = "";
-	if (node.characters) content = escapeHtml(node.characters);
-	const dataType = includeLabels ? ` data-type="${escapeHtml(node.type)}"` : "";
-	if (!hasChildren) return `<div class="${classes}"${dataType}>${label}${content}</div>`;
-	return `<div class="${classes}"${dataType}>${label}${node.children.map((child, index) => renderNodeAbsolute(child, false, includeLabels, cssRules, `${path}-${index}`, node.x, node.y)).join("")}</div>`;
-}
-function renderAbsoluteToHtml(node, options = {}) {
-	const { scale = 1, rootClassName = "abs-root", includeLabels = false } = options;
-	const cssRules = [];
-	const scaleClass = formatScaleClass(scale);
-	const cleanedNode = removeRedundantNesting(node);
-	return `<div class="${rootClassName} ${scaleClass}">${renderNodeAbsolute(cleanedNode, true, includeLabels, cssRules, "0", cleanedNode.x, cleanedNode.y)}</div>`;
-}
-function renderAbsolutePage(node, options = {}) {
-	const { title = "Absolute Layout", includeStyles = true, scale = 1, includeLabels = false } = options;
-	const cssRules = [];
-	const scaleClass = formatScaleClass(scale);
-	const cleanedNode = removeRedundantNesting(node);
-	const body = `<div class="abs-root ${scaleClass}">${renderNodeAbsolute(cleanedNode, true, includeLabels, cssRules, "0", cleanedNode.x, cleanedNode.y)}</div>`;
-	return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(title)}</title>
-    ${includeStyles ? `<style>
-      body { margin: 0; padding: 16px; font-family: ui-sans-serif, system-ui, -apple-system; color: #333; }
-      .abs-root { position: relative; }
-      .abs-node { box-sizing: border-box; overflow: hidden; }
-      .abs-node.type-text { display: flex; align-items: center; white-space: nowrap; }
-      .abs-node.type-image, .abs-node.type-icon, .abs-node.type-vector { background: #d1d5db; }
-      .${scaleClass} { transform: scale(${scale}); transform-origin: top left; }
-      ${cssRules.join("\n")}
-    </style>` : ""}
-  </head>
-  <body>
-    ${body}
-  </body>
-</html>`;
-}
-var BASE_STYLES = `body { margin: 0; padding: 16px; }
-.layout-root { position: relative; }
-.layout-node { box-sizing: border-box; flex-shrink: 0; }
-/* 组合类：flex方向 + 交叉轴对齐 */
-.flex-row-start { display: flex; flex-direction: row; align-items: flex-start; }
-.flex-row-center { display: flex; flex-direction: row; align-items: center; }
-.flex-row-end { display: flex; flex-direction: row; align-items: flex-end; }
-.flex-col-start { display: flex; flex-direction: column; align-items: flex-start; }
-.flex-col-center { display: flex; flex-direction: column; align-items: center; }
-.flex-col-end { display: flex; flex-direction: column; align-items: flex-end; }
-/* 主轴对齐（较少使用，保留单独类） */
-.justify-center { justify-content: center; }
-.justify-end { justify-content: flex-end; }
-.justify-between { justify-content: space-between; }
-/* 按钮重置并默认居中 */
-.btn { display: inline-flex; align-items: center; justify-content: center; text-align: center; border: none; padding: 0; background: none; outline: none; appearance: none; -webkit-appearance: none; }
-/* 图片/图标占位背景 - 纯灰色，与背景渐变区分 */
-.type-image, .type-icon, .type-vector { background: #d1d5db !important; border-radius: 4px; }`;
-function renderLayoutPageWithCss(node, options = {}) {
-	const { title = "Layout Render", includeStyles = true, ...rest } = options;
-	const { rootClassName = "layout-root", includeLabels = false, classMode = "tailwind", debugMode = false, enableDedup = false, semanticTags = true, includeNodeId = true, includeNodeName = false } = rest;
-	const designWidth = node.width || 1920;
-	const cleanedNode = removeRedundantNesting(node);
-	let body;
-	let css;
-	if (enableDedup) {
-		const entries = [];
-		collectAllStyles(cleanedNode, true, "0", void 0, entries, []);
-		const dedupResult = deduplicateStyles(entries);
-		body = `<div id="layout-container" class="${rootClassName}">${renderNodeWithDedup(cleanedNode, true, includeLabels, classMode, debugMode, dedupResult, "0", void 0, semanticTags, includeNodeId, includeNodeName)}</div>`;
-		css = [generateSharedCss(dedupResult.sharedClasses), generateUniqueCssRules(dedupResult)].filter(Boolean).join("\n\n");
-	} else {
-		const cssRules = [];
-		body = `<div id="layout-container" class="${rootClassName}">${renderNode(cleanedNode, true, includeLabels, classMode, debugMode, cssRules, "0", void 0, semanticTags, includeNodeId, includeNodeName)}</div>`;
-		css = cssRules.join("\n\n");
-	}
-	const fullCss = `${BASE_STYLES}\n\n${css}`;
-	const scaleScript = `
-    <script>
-      (function() {
-        var designWidth = ${designWidth};
-        var container = document.getElementById('layout-container');
-        function updateScale() {
-          var deviceWidth = window.innerWidth - 32; // 减去 body padding
-          var scale = Math.min(deviceWidth / designWidth, 1);
-          container.style.transform = 'scale(' + scale + ')';
-          container.style.transformOrigin = 'top left';
-        }
-        updateScale();
-        window.addEventListener('resize', updateScale);
-      })();
-    <\/script>`;
-	return {
-		html: `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(title)}</title>
-    ${includeStyles ? `<style>\n${fullCss}\n    </style>` : ""}
-  </head>
-  <body>
-    ${body}
-    ${scaleScript}
-  </body>
-</html>`,
-		css,
-		fullCss
-	};
-}
-function renderLayoutPage(node, options = {}) {
-	return renderLayoutPageWithCss(node, options).html;
-}
-function renderNodeWithClass(node, classNameMap, sharedClasses, includeLabels) {
-	const hasChildren = node.children && node.children.length > 0;
-	const classes = [];
-	const baseClass = classNameMap.get(node.id);
-	if (baseClass) classes.push(baseClass);
-	if (sharedClasses) {
-		const shared = sharedClasses.get(node.id);
-		if (shared) classes.push(...shared);
-	}
-	const classAttr = classes.length > 0 ? ` class="${classes.join(" ")}"` : "";
-	const label = includeLabels ? `<div class="node-label">${escapeHtml(node.name || node.type)}</div>` : "";
-	let content = "";
-	if (node.type === "TEXT" && node.characters) content = escapeHtml(node.characters);
-	else if (node.type === "IMAGE") content = "";
-	if (!hasChildren) return `<div${classAttr}>${label}${content}</div>`;
-	return `<div${classAttr}>${label}\n${node.children.map((child) => renderNodeWithClass(child, classNameMap, sharedClasses, includeLabels)).join("\n")}\n</div>`;
-}
-function renderHtmlWithClasses(node, options) {
-	const { classNameMap, sharedClasses, includeLabels = false } = options;
-	return renderNodeWithClass(removeRedundantNesting(node), classNameMap, sharedClasses, includeLabels);
-}
-function renderSeparatedPage(node, css, options) {
-	const { title = "Layout", classNameMap, sharedClasses, includeLabels = false } = options;
-	const body = renderNodeWithClass(removeRedundantNesting(node), classNameMap, sharedClasses, includeLabels);
-	return {
-		html: `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(title)}</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    ${body}
-  </body>
-</html>`,
-		css
-	};
-}
-function checkBackgroundOverflow(node, parent, issues, ctx) {
-	if (!parent) return;
-	if (node.imageRole !== "background") return;
-	const tol = ctx.options.backgroundTolerance;
-	const leftOverflow = parent.x - node.x;
-	const topOverflow = parent.y - node.y;
-	const rightOverflow = node.x + node.width - (parent.x + parent.width);
-	const bottomOverflow = node.y + node.height - (parent.y + parent.height);
-	if (!(leftOverflow > tol || topOverflow > tol || rightOverflow > tol || bottomOverflow > tol)) return;
-	issues.push({
-		id: ctx.createIssueId("BACKGROUND_OUT_OF_BOUNDS", node.id),
-		type: "BACKGROUND_OUT_OF_BOUNDS",
-		severity: "warning",
-		nodeId: node.id,
-		nodeName: node.name,
-		message: "背景层尺寸或位置超出父容器，可能导致溢出",
-		suggestion: "请将背景与父容器尺寸对齐，或调整偏移",
-		metrics: {
-			leftOverflow,
-			topOverflow,
-			rightOverflow,
-			bottomOverflow
-		},
-		relatedNodeIds: [parent.id]
-	});
-}
-function checkSiblingOverlap(node, issues, ctx) {
-	if (!node.children || node.children.length === 0) return;
-	const result = prefilterOverlappingLayers(node.children);
-	if (result.removed.length > 0) for (const removed of result.removed) issues.push({
-		id: ctx.createIssueId("SIBLING_OVERLAP", removed.id),
-		type: "SIBLING_OVERLAP",
-		severity: "warning",
-		nodeId: removed.id,
-		nodeName: removed.name,
-		message: "检测到同名且高度重叠的兄弟节点，疑似重复或层级错误",
-		suggestion: "请检查是否存在重复图层或放错父级",
-		relatedNodeIds: [node.id]
-	});
-	if (result.isolated.length > 0) for (const isolated of result.isolated) issues.push({
-		id: ctx.createIssueId("FULL_COVER_LAYER", isolated.id),
-		type: "FULL_COVER_LAYER",
-		severity: "warning",
-		nodeId: isolated.id,
-		nodeName: isolated.name,
-		message: "检测到覆盖父容器大部分区域的异常层，可能淹没其他内容",
-		suggestion: "请确认该层是否为背景或占位，如非必要建议调整或移除",
-		relatedNodeIds: [node.id]
-	});
-	const reportedPairs = /* @__PURE__ */ new Set();
-	const children = node.children;
-	for (let i = 0; i < children.length; i++) for (let j = i + 1; j < children.length; j++) {
-		const a = children[i];
-		const b = children[j];
-		if (a.imageRole === "background" || b.imageRole === "background") continue;
-		const overlapRatio = calcOverlapRatio(a, b);
-		const samePosition = Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1;
-		if (overlapRatio >= ctx.options.overlapThreshold || samePosition) {
-			const key = `${a.id}-${b.id}`;
-			if (reportedPairs.has(key)) continue;
-			reportedPairs.add(key);
-			issues.push({
-				id: ctx.createIssueId("SIBLING_OVERLAP", a.id),
-				type: "SIBLING_OVERLAP",
-				severity: "warning",
-				nodeId: a.id,
-				nodeName: a.name,
-				message: "同级元素出现大面积重叠或完全同坐标，疑似层级错误",
-				suggestion: "请检查图层顺序与归属，避免重叠导致的可视异常",
-				relatedNodeIds: [b.id, node.id],
-				metrics: { overlapRatio }
-			});
-		}
-	}
-}
-function calcOverlapRatio(a, b) {
-	const overlapArea = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
-	const smallerArea = Math.min(a.width * a.height, b.width * b.height);
-	if (smallerArea <= 0) return 0;
-	return overlapArea / smallerArea;
-}
-function checkSpacing(node, issues, ctx) {
-	if (!node.children || node.children.length < 2) return;
-	const direction = node.layout?.flexDirection === "column" ? "column" : "row";
-	const sorted = [...node.children].sort((a, b) => direction === "row" ? a.x - b.x : a.y - b.y);
-	const spacing = analyzeChildSpacing(node, sorted, direction === "row");
-	if (spacing.useGap && spacing.gap > 0) issues.push({
-		id: ctx.createIssueId("UNIFIED_GAP_SUGGESTED", node.id),
-		type: "UNIFIED_GAP_SUGGESTED",
-		severity: "info",
-		nodeId: node.id,
-		nodeName: node.name,
-		message: `子元素间距基本一致，建议统一间距≈${spacing.gap}px`,
-		suggestion: "将相邻元素的间隔统一为同一数值，保持等距排布",
-		metrics: { gap: spacing.gap }
-	});
-	const gaps = [];
-	for (let i = 1; i < sorted.length; i++) {
-		const prev = getEffectiveBounds(sorted[i - 1]);
-		const curr = getEffectiveBounds(sorted[i]);
-		const gap = direction === "row" ? curr.x - (prev.x + prev.width) : curr.y - (prev.y + prev.height);
-		gaps.push(gap);
-	}
-	if (gaps.length === 0) return;
-	const minGap = Math.min(...gaps);
-	const maxGap = Math.max(...gaps);
-	if (maxGap - minGap > ctx.options.gapTolerance) issues.push({
-		id: ctx.createIssueId("INCONSISTENT_SPACING", node.id),
-		type: "INCONSISTENT_SPACING",
-		severity: "warning",
-		nodeId: node.id,
-		nodeName: node.name,
-		message: "同一容器内的主轴间距差异较大，疑似未统一布局规则",
-		suggestion: "请检查自动布局间距设置，或统一留白值",
-		metrics: {
-			minGap,
-			maxGap
-		}
-	});
-}
-var DEVICE_KEYWORDS = [
-	"phone",
-	"device",
-	"frame",
-	"screen",
-	"mobile"
-];
-var SYSTEM_UI_KEYWORDS = [
-	"statusbar",
-	"bottombar",
-	"navbar",
-	"tabbar"
-];
-function checkDeviceFrame(node, parent, issues, ctx) {
-	if (!parent) return;
-	if (node.type !== "INSTANCE" && node.type !== "COMPONENT") return;
-	const name = node.name?.toLowerCase() || "";
-	if (!DEVICE_KEYWORDS.some((k) => name.includes(k))) return;
-	if (!(parent.width > 0 && parent.height > 0 && Math.abs(node.width - parent.width) / parent.width <= .05 && Math.abs(node.height - parent.height) / parent.height <= .05)) return;
-	const hasParallelContent = (parent.children?.length || 0) > 1;
-	if (hasParallelContent) issues.push({
-		id: ctx.createIssueId("DEVICE_FRAME_PARALLEL_CONTENT", node.id),
-		type: "DEVICE_FRAME_PARALLEL_CONTENT",
-		severity: "warning",
-		nodeId: node.id,
-		nodeName: node.name,
-		message: "检测到设备框架与主要内容并列，可能导致内容不在设备壳内",
-		suggestion: "请将页面内容放入设备框架内部，或移除外层设备框架",
-		relatedNodeIds: parent.children?.map((c) => c.id) || []
-	});
-	if (node.children && node.children.length > 0) {
-		if (node.children.every((child) => SYSTEM_UI_KEYWORDS.some((k) => child.name?.toLowerCase().includes(k))) && hasParallelContent) issues.push({
-			id: ctx.createIssueId("DEVICE_FRAME_PARALLEL_CONTENT", `${node.id}-ui`),
-			type: "DEVICE_FRAME_PARALLEL_CONTENT",
-			severity: "info",
-			nodeId: node.id,
-			nodeName: node.name,
-			message: "设备框架内部仅包含系统 UI，主要内容放在同级，结构可能不合理",
-			suggestion: "考虑将系统 UI 与业务内容统一到同一层级或内部容器",
-			relatedNodeIds: parent.children?.map((c) => c.id) || []
-		});
-	}
-}
-function checkChildOverflow(node, parent, issues, ctx) {
-	if (!parent) return;
-	if (node.imageRole === "background") return;
-	const tol = ctx.options.backgroundTolerance;
-	const overflowLeft = parent.x - node.x;
-	const overflowTop = parent.y - node.y;
-	const overflowRight = node.x + node.width - (parent.x + parent.width);
-	const overflowBottom = node.y + node.height - (parent.y + parent.height);
-	if (!(overflowLeft > tol || overflowTop > tol || overflowRight > tol || overflowBottom > tol)) return;
-	issues.push({
-		id: ctx.createIssueId("CHILD_OVERFLOW", node.id),
-		type: "CHILD_OVERFLOW",
-		severity: "warning",
-		nodeId: node.id,
-		nodeName: node.name,
-		message: "子元素超出父容器范围，可能影响布局",
-		suggestion: "检查父容器尺寸或将内容调整到可视范围内",
-		metrics: {
-			overflowLeft,
-			overflowTop,
-			overflowRight,
-			overflowBottom
-		},
-		relatedNodeIds: [parent.id]
-	});
-}
-function checkMissingGroup(node, issues, ctx) {
-	if (!node.children || node.children.length < 2) return;
-	const children = node.children.filter((c) => c.imageRole !== "background" && c.visible !== false);
-	if (children.length < 2) return;
-	const sorted = [...children].sort((a, b) => a.y - b.y);
-	const processedIds = /* @__PURE__ */ new Set();
-	for (let i = 0; i < sorted.length - 1; i++) {
-		const curr = sorted[i];
-		const next = sorted[i + 1];
-		if (processedIds.has(curr.id) || processedIds.has(next.id)) continue;
-		if (curr.width > 300 || next.width > 300 || curr.height > 300 || next.height > 300) continue;
-		const currBounds = getEffectiveBounds(curr);
-		const nextBounds = getEffectiveBounds(next);
-		const vGap = nextBounds.y - (currBounds.y + currBounds.height);
-		const centerDiff = Math.abs(currBounds.x + currBounds.width / 2 - (nextBounds.x + nextBounds.width / 2));
-		const isTightStack = vGap >= 0 && vGap <= 8 && centerDiff < 20;
-		let isRowPair = false;
-		let rowNext = null;
-		if (!isTightStack) {
-			const rowCandidates = children.filter((c) => c.id !== curr.id && Math.abs(c.y - curr.y) < 10 && c.x > curr.x).sort((a, b) => a.x - b.x);
-			if (rowCandidates.length > 0) {
-				rowNext = rowCandidates[0];
-				const rnBounds = getEffectiveBounds(rowNext);
-				const hGap = rnBounds.x - (currBounds.x + currBounds.width);
-				const vCenterDiff = Math.abs(currBounds.y + currBounds.height / 2 - (rnBounds.y + rnBounds.height / 2));
-				if (hGap >= 0 && hGap <= 12 && vCenterDiff < 10) isRowPair = true;
-			}
-		}
-		if (isTightStack) {
-			reportIssue(curr, next, "垂直紧密堆叠", issues, ctx);
-			processedIds.add(curr.id);
-			processedIds.add(next.id);
-		} else if (isRowPair && rowNext) {
-			reportIssue(curr, rowNext, "水平紧密关联", issues, ctx);
-			processedIds.add(curr.id);
-			processedIds.add(rowNext.id);
-		}
-	}
-}
-function reportIssue(a, b, reason, issues, ctx) {
-	issues.push({
-		id: ctx.createIssueId("MISSING_GROUP", a.id),
-		type: "MISSING_GROUP",
-		severity: "info",
-		nodeId: a.id,
-		nodeName: `${a.name} + ${b.name}`,
-		message: `检测到 ${reason} 的元素未编组`,
-		suggestion: "建议将这两个关联紧密的元素打组（Frame/Group），便于管理和布局",
-		relatedNodeIds: [b.id]
-	});
-}
-var GEO_EPS = 1;
-function checkMergeCandidates(node, parent, issues, ctx) {
-	if (parent) detectParentChildCollapse(parent, node, issues, ctx);
-	if (node.children && node.children.length > 1) detectSameGeometrySiblings(node, issues, ctx);
-}
-function detectParentChildCollapse(parent, child, issues, ctx) {
-	if (!parent.children || parent.children.length !== 1) return;
-	const sameGeometry = isSameGeometry(parent, child);
-	const overflow = isOverflow(child, parent);
-	if (!sameGeometry && !overflow) return;
-	const parentScore = calculateMeaningfulness(parent);
-	const childScore = calculateMeaningfulness(child);
-	const keepParent$1 = parentScore >= childScore;
-	issues.push({
-		id: ctx.createIssueId("MERGE_SUGGESTION", parent.id),
-		type: "MERGE_SUGGESTION",
-		severity: overflow ? "warning" : "info",
-		nodeId: keepParent$1 ? parent.id : child.id,
-		nodeName: keepParent$1 ? parent.name : child.name,
-		message: sameGeometry ? "父子尺寸与位置相同，疑似冗余包装，可塌缩为单层。" : "子元素尺寸超出父容器，建议调整或直接保留子元素。",
-		suggestion: keepParent$1 ? "保留父容器，合并子元素内容与样式。" : "保留子元素，用其替代父容器以减少嵌套。",
-		relatedNodeIds: [keepParent$1 ? child.id : parent.id],
-		metrics: {
-			parentScore,
-			childScore,
-			overflow: overflow ? 1 : 0
-		}
-	});
-}
-function detectSameGeometrySiblings(node, issues, ctx) {
-	const children = node.children;
-	const reported = /* @__PURE__ */ new Set();
-	for (let i = 0; i < children.length; i++) for (let j = i + 1; j < children.length; j++) {
-		const a = children[i];
-		const b = children[j];
-		if (!isSameGeometry(a, b)) continue;
-		const scoreA = calculateMeaningfulness(a);
-		const scoreB = calculateMeaningfulness(b);
-		const keepA = scoreA >= scoreB;
-		const keep = keepA ? a : b;
-		const remove = keepA ? b : a;
-		const key = `${keep.id}-${remove.id}`;
-		if (reported.has(key)) continue;
-		reported.add(key);
-		issues.push({
-			id: ctx.createIssueId("SAME_GEOMETRY_SIBLINGS", keep.id),
-			type: "SAME_GEOMETRY_SIBLINGS",
-			severity: "info",
-			nodeId: keep.id,
-			nodeName: keep.name,
-			message: "同级节点几何完全相同，建议合并以减少重复层。",
-			suggestion: `保留 ${keep.name}，合并/移除 ${remove.name}，避免重复覆盖。`,
-			relatedNodeIds: [remove.id, node.id],
-			metrics: {
-				keepScore: keepA ? scoreA : scoreB,
-				removeScore: keepA ? scoreB : scoreA
-			}
-		});
-	}
-}
-function isSameGeometry(a, b) {
-	return Math.abs((a.x ?? 0) - (b.x ?? 0)) < GEO_EPS && Math.abs((a.y ?? 0) - (b.y ?? 0)) < GEO_EPS && Math.abs((a.width ?? 0) - (b.width ?? 0)) < GEO_EPS && Math.abs((a.height ?? 0) - (b.height ?? 0)) < GEO_EPS;
-}
-function isOverflow(child, parent) {
-	return (child.width ?? 0) > (parent.width ?? 0) + GEO_EPS || (child.height ?? 0) > (parent.height ?? 0) + GEO_EPS;
-}
-var DEFAULT_OPTS = {
-	overlapThreshold: .6,
-	gapTolerance: 2,
-	backgroundTolerance: 2
-};
-function checkDesign(json, options = {}) {
-	const { pipelineOptions = {
-		removeHidden: true,
-		removeTransparent: true,
-		removeZeroSize: true,
-		autoSort: true,
-		enableGrouping: false
-	}, enableGrouping = true, applyLayout: applyLayout$1 = true, checkOptions } = options;
-	const { tree } = processPipeline(json, {
-		...pipelineOptions,
-		enableGrouping: false
-	});
-	if (!tree) return {
-		tree: null,
-		issues: []
-	};
-	if (enableGrouping) clusterGroups(tree);
-	if (applyLayout$1) applyLayout(tree);
-	return {
-		tree,
-		issues: checkLayoutTree(tree, checkOptions)
-	};
-}
-function checkLayoutTree(root, options = {}) {
-	const opts = {
-		...DEFAULT_OPTS,
-		...options
-	};
-	let counter = 0;
-	const ctx = {
-		createIssueId: (type, nodeId) => `${type}-${nodeId}-${++counter}`,
-		options: opts
-	};
-	const issues = [];
-	function walk(node, parent) {
-		checkBackgroundOverflow(node, parent, issues, ctx);
-		checkChildOverflow(node, parent, issues, ctx);
-		checkDeviceFrame(node, parent, issues, ctx);
-		checkMergeCandidates(node, parent, issues, ctx);
-		if (node.children && node.children.length > 0) {
-			checkSiblingOverlap(node, issues, ctx);
-			checkSpacing(node, issues, ctx);
-			checkMissingGroup(node, issues, ctx);
-			node.children.forEach((child) => walk(child, node));
-		}
-	}
-	walk(root, null);
-	return issues;
-}
-function formatDiagnostics(issues) {
-	if (!issues || issues.length === 0) return "No issues found.";
-	const severityOrder = {
-		error: 2,
-		warning: 1,
-		info: 0
-	};
-	const sorted = [...issues].sort((a, b) => {
-		const s = severityOrder[b.severity] - severityOrder[a.severity];
-		if (s !== 0) return s;
-		return a.type.localeCompare(b.type);
-	});
-	const lines = [];
-	const counts = sorted.reduce((acc, cur) => {
-		acc[cur.severity] += 1;
-		return acc;
-	}, {
-		error: 0,
-		warning: 0,
-		info: 0
-	});
-	lines.push(`Issues: total ${sorted.length} (error ${counts.error}, warning ${counts.warning}, info ${counts.info})`);
-	for (const issue of sorted) {
-		const msg = `${`[${issue.severity.toUpperCase()}] ${issue.type} · ${issue.nodeName} (${issue.nodeId})`} => ${issue.message}`;
-		lines.push(msg);
-		if (issue.suggestion) lines.push(`  ↳ Suggestion: ${issue.suggestion}`);
-		if (issue.relatedNodeIds && issue.relatedNodeIds.length > 0) lines.push(`  ↳ Related: ${issue.relatedNodeIds.join(", ")}`);
-	}
-	return lines.join("\n");
-}
-function generateContainmentTree(json, options) {
-	const { tree } = processPipeline(json, options);
-	return tree;
-}
-const utils = {
-	hasDeveloperPluginData,
-	isAtomicComponent
-};
 function processDesign(json, options = {}) {
 	const { removeHidden = true, removeTransparent = true, removeZeroSize = true, removeOverflow = true, removeOccluded = true, autoSort = true, flattenMode = "full", containerRecoveryMode = "styled-only", clusterAlgorithm = "dbscan", dbscanEps = "auto", gapThresholdX = 50, gapThresholdY = 30, minClusterSize = 2, generateStyles = true } = options;
 	const { tree: preprocessed, stats } = processPipeline(json, {
@@ -5361,4 +3966,41 @@ function processDesign(json, options = {}) {
 		}
 	};
 }
-export { CONTAINER_TYPES, DEFAULT_COMPRESS_OPTIONS, LEAF_TYPES, PRESERVE_TYPES, TokenMatcher, analyzeChildSpacing, antdTokens, applyLayout, applyStylesToTree, calcBounds, calcChildMargins, calcChildrenMargins, checkDesign, checkLayoutTree, clusterGroups, clusterLeaves, clusterWithDBSCAN, clusterWithinContainers, collectContainers, compressDSL, convertCornerRadius, convertEffects, convertFills, convertStrokes, convertTextStyles, createTokenMatcher, deduplicateSameNameOverlaps, extractStyles, figmaColorToHex, figmaColorToRgba, filterAndPropagate, findRows, flatten, flattenToLeaves, formatDiagnostics, generateContainmentTree, generateOptimizedCss, getCompressionStats, getEffectiveBounds, getNodeOptimizedStyle, getTextBaselineWidth, hasVisualStylesForSpacing, isolateFullCoverElements, optimizeStyles, parseColorString, prefilterOverlappingLayers, preserveGroupsFlatten, printSplitResult, printStats, processDesign, processPipeline, projectionSplit, recoverContainersLayered, regroupByContainment, regroupTreeByContainment, renderAbsolutePage, renderAbsoluteToHtml, renderHtmlWithClasses, renderLayoutPage, renderLayoutPageWithCss, renderLayoutToHtml, renderSeparatedPage, smartFlatten, splitResultToTree, splitWithinContainers, stylesToInlineString, tailwindTokens, toJsonString, utils };
+var DESIGN_TO_CODE_HTML_OPTIONS = {
+	classMode: "tailwind",
+	semanticTags: true,
+	enableDedup: true,
+	includeNodeId: false,
+	includeNodeName: true
+};
+var DESIGN_TO_CODE_DSL_OPTIONS = {
+	simplifyId: true,
+	removeCoordinates: true,
+	keepAllName: true,
+	omitDefaults: true,
+	convertColors: true,
+	removeUnits: true
+};
+function designToCode(json, options) {
+	if (isNewDslFormat(json)) throw new Error("designToCode 只接受标准 Figma JSON 格式，检测到 meta+content 结构的缩写 DSL 输入，请传入原始 Figma 导出的 JSON。");
+	const { tree } = processDesign(json);
+	if (!tree) return {
+		html: void 0,
+		css: void 0,
+		dsl: void 0
+	};
+	if (options.mode === "html") {
+		const result = renderLayoutPageWithCss(tree, DESIGN_TO_CODE_HTML_OPTIONS);
+		return {
+			html: result.html,
+			css: result.fullCss
+		};
+	}
+	if (options.mode === "dsl") return { dsl: toJsonString(compressDSL(tree, DESIGN_TO_CODE_DSL_OPTIONS)) };
+	return {
+		html: void 0,
+		css: void 0,
+		dsl: void 0
+	};
+}
+export { designToCode };

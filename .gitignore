@@ -6,4 +6,4 @@ dist-octo
 .swarm/
 .claude-flow/
 .claude/helpers/
-.mcp.json
+.mcp.json.DS_Store
