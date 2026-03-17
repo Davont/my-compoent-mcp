@@ -12,13 +12,7 @@
 import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'fs';
 import { isAbsolute, join, resolve, sep } from 'path';
-import {
-  processDesign,
-  compressDSL,
-  toJsonString,
-  renderLayoutPageWithCss,
-} from '../../octo/core.js';
-import type { LayoutNode, CompressOptions } from '../../octo/core.js';
+import { designToCode } from '../../octo/core.js';
 import { decodeSharePassword, extractTransferZipToDir } from '../../utils/octo-transfer.js';
 import { listOctoFiles, type OctoFileInfo } from '../../utils/octo-files.js';
 import {
@@ -255,15 +249,6 @@ async function fetchByFileKey(
 
 // ======================== 转换逻辑 ========================
 
-const DSL_COMPRESS_OPTIONS: CompressOptions = {
-  simplifyId: true,
-  removeCoordinates: true,
-  keepAllName: true,
-  omitDefaults: true,
-  convertColors: true,
-  removeUnits: true,
-};
-
 interface TransformOutput {
   ok: true;
   outputMode: OutputMode;
@@ -286,54 +271,45 @@ function transformAndSave(
     console.log = () => {};
     console.warn = () => {};
 
-    const result = processDesign(json);
-    const tree: LayoutNode | null = result?.tree ?? null;
-
-    if (!tree) {
-      return {
-        content: [{ type: 'text', text: 'processDesign 未能生成布局树，设计数据可能格式不正确。' }],
-        isError: true,
-      };
-    }
+    const coreMode = outputMode === 'dsl' ? 'dsl' as const : 'html' as const;
+    const result = designToCode(json, { mode: coreMode });
 
     const files: Array<{ name: string; size: string }> = [];
 
     if (outputMode === 'dsl') {
-      const compressed = compressDSL(tree, DSL_COMPRESS_OPTIONS);
-      const dslContent = toJsonString(compressed);
+      if (!result.dsl) {
+        return {
+          content: [{ type: 'text', text: 'designToCode 未能生成 DSL，设计数据可能格式不正确。' }],
+          isError: true,
+        };
+      }
       const outPath = join(octoDir, `${saveName}.dsl.json`);
-      writeFileSync(outPath, dslContent, 'utf-8');
-      files.push({ name: `${saveName}.dsl.json`, size: formatBytes(Buffer.byteLength(dslContent, 'utf-8')) });
+      writeFileSync(outPath, result.dsl, 'utf-8');
+      files.push({ name: `${saveName}.dsl.json`, size: formatBytes(Buffer.byteLength(result.dsl, 'utf-8')) });
     } else if (outputMode === 'html') {
-      const pageResult = renderLayoutPageWithCss(tree, {
-        classMode: 'tailwind',
-        semanticTags: true,
-        enableDedup: true,
-        includeNodeId: false,
-        includeNodeName: true,
-      });
-
-      const css = pageResult.fullCss.replace(/body\s*\{[^}]*\}\n?/g, '').trim();
-      const html = pageResult.html;
+      if (!result.html || !result.css) {
+        return {
+          content: [{ type: 'text', text: 'designToCode 未能生成 HTML，设计数据可能格式不正确。' }],
+          isError: true,
+        };
+      }
+      const css = result.css.replace(/body\s*\{[^}]*\}\n?/g, '').trim();
 
       const cssPath = join(octoDir, `${saveName}.css`);
       const htmlPath = join(octoDir, `${saveName}.html`);
       writeFileSync(cssPath, css, 'utf-8');
-      writeFileSync(htmlPath, html, 'utf-8');
+      writeFileSync(htmlPath, result.html, 'utf-8');
       files.push({ name: `${saveName}.css`, size: formatBytes(Buffer.byteLength(css, 'utf-8')) });
-      files.push({ name: `${saveName}.html`, size: formatBytes(Buffer.byteLength(html, 'utf-8')) });
+      files.push({ name: `${saveName}.html`, size: formatBytes(Buffer.byteLength(result.html, 'utf-8')) });
     } else {
-      // vue 模式
-      const pageResult = renderLayoutPageWithCss(tree, {
-        classMode: 'tailwind',
-        semanticTags: true,
-        enableDedup: true,
-        includeNodeId: false,
-        includeNodeName: true,
-      });
-
-      const template = extractVueTemplate(pageResult.html);
-      const css = pageResult.fullCss.replace(/body\s*\{[^}]*\}\n?/g, '').trim();
+      if (!result.html || !result.css) {
+        return {
+          content: [{ type: 'text', text: 'designToCode 未能生成布局数据，设计数据可能格式不正确。' }],
+          isError: true,
+        };
+      }
+      const template = extractVueTemplate(result.html);
+      const css = result.css.replace(/body\s*\{[^}]*\}\n?/g, '').trim();
       const vue = [
         '<template>',
         template,

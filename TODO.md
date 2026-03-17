@@ -117,6 +117,19 @@
 - **需要补充的能力**：待分析
 - **优先级**：低
 
+### 12. design_to_code html 模式不应硬绑定 React
+- **现状**：`design_to_code` 的 html 模式被硬编码为 React 输出：
+  - `transform/index.ts` 的 `htmlBodyToJsx` 强制做 `class→className` 转换
+  - `tools/design-to-code.ts` 的 `formatTransformOutput` 直接拼 `Page.tsx`、`import React`、`export default function Page()`
+  - 工具描述写死 `html: React 脚手架（CSS + JSX）`
+- **问题**：MCP 本身没有限定框架，`core.js` 输出的是通用 HTML + CSS。html 模式强绑 React 限制了通用性，且和 devUI 模式（Vue）形成了不对称的设计
+- **可选方案**：
+  - A）html 模式直接返回 core.js 的原始 HTML + CSS，去掉 JSX 转换，让 AI 根据用户项目自行决定框架
+  - B）把 html 模式拆成 react / vue / html 三个子模式，框架适配逻辑按需走
+  - C）保持现状，但把工具描述改准确，明确告知 AI 这是 React 专用模式
+- **涉及文件**：`src/transform/index.ts`（htmlBodyToJsx、cleanCssForReact）、`src/tools/design-to-code.ts`（formatTransformOutput、工具描述）
+- **优先级**：中
+
 
 
  1. http 启动 banner 仍打印旧工具名，和真实注册不一致，容易误导。

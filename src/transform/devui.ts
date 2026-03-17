@@ -1,23 +1,14 @@
 /**
  * devUI 模式：设计稿 JSON → Vue SFC 转换
  *
- * core.js 负责 Vue 代码生成（含组件库组件），本模块负责：
- * 1. 调用 core.js 获取 LayoutNode 树
- * 2. 渲染为 Vue template + CSS（临时复用 renderLayoutPageWithCss，后续替换为 core.js Vue API）
- * 3. 生成组件 import 语句
- * 4. 拼装为完整的 Vue SFC
+ * 通过 core.js 的 designToCode 统一入口获取 HTML + CSS，再拼装为 Vue SFC。
  *
  * 与 HTML 模式隔离，不影响 dsl/html 的现有逻辑。
  */
 
-import { processDesign, renderLayoutPageWithCss } from '../octo/core.js';
-import type { LayoutNode } from '../octo/core.js';
-import {
-  getComponentList,
-  readComponentDoc,
-  parseFrontmatter,
-  type ComponentIndexEntry,
-} from '../utils/doc-reader.js';
+import { designToCode } from '../octo/core.js';
+import { readComponentDoc, parseFrontmatter } from '../utils/doc-reader.js';
+import { extractRecommendedComponents } from '../utils/component-recognizer.js';
 import { PACKAGE_NAME, DEFAULT_IMPORT_STYLE } from '../config.js';
 
 // ======================== 类型 ========================
@@ -32,40 +23,32 @@ export interface DevUITransformResult {
 // ======================== 主函数 ========================
 
 export function transformDevUI(json: unknown): DevUITransformResult {
+  const recommendedComponents = extractRecommendedComponents(json);
+
   const _log = console.log;
   const _warn = console.warn;
   try {
     console.log = () => {};
     console.warn = () => {};
 
-    let tree: LayoutNode | null = null;
+    let result: { html?: string; css?: string; dsl?: string };
     try {
-      const result = processDesign(json);
-      tree = result?.tree ?? null;
+      result = designToCode(json, { mode: 'html' });
     } catch (err) {
       _warn(
-        '[devUI] processDesign failed, falling back to raw JSON:',
+        '[devUI] designToCode failed, falling back to raw JSON:',
         err instanceof Error ? err.message : err,
       );
-    }
-
-    if (!tree) {
       return fallbackDevUI(json);
     }
 
-    const recommendedComponents = extractRecommendedComponents(tree);
+    if (!result.html || !result.css) {
+      return fallbackDevUI(json);
+    }
+
     const imports = generateComponentImports(recommendedComponents);
-
-    const pageResult = renderLayoutPageWithCss(tree, {
-      classMode: 'tailwind',
-      semanticTags: true,
-      enableDedup: true,
-      includeNodeId: false,
-      includeNodeName: true,
-    });
-
-    const template = htmlBodyToVueTemplate(pageResult.html);
-    const css = cleanCss(pageResult.fullCss);
+    const template = htmlBodyToVueTemplate(result.html);
+    const css = cleanCss(result.css);
     const vue = formatVueSFC(template, css, imports);
 
     return {
@@ -238,47 +221,6 @@ function getImportForComponent(name: string): string {
     : `import ${name} from '${PACKAGE_NAME}/${name}'`;
 }
 
-// ======================== 组件识别 ========================
-
-function extractRecommendedComponents(tree: LayoutNode): string[] {
-  let knownComponents: ComponentIndexEntry[];
-  try {
-    knownComponents = getComponentList();
-  } catch {
-    return [];
-  }
-  if (knownComponents.length === 0) return [];
-
-  const nodeTokens = new Set<string>();
-  walkTree(tree, (node: LayoutNode) => {
-    if (node.type !== 'INSTANCE' && node.type !== 'COMPONENT') return;
-    const name = node.name || '';
-    nodeTokens.add(name.toLowerCase());
-    for (const part of name.split(/[\/=,\s·]+/)) {
-      const trimmed = part.trim();
-      if (trimmed.length > 1) nodeTokens.add(trimmed.toLowerCase());
-    }
-  });
-
-  if (nodeTokens.size === 0) return [];
-
-  const matched = new Set<string>();
-  for (const comp of knownComponents) {
-    const nameLower = comp.name.toLowerCase();
-    if (nodeTokens.has(nameLower)) { matched.add(comp.name); continue; }
-    if (comp.aliases?.some(a => nodeTokens.has(a.toLowerCase()))) { matched.add(comp.name); continue; }
-    if (comp.keywords?.some(k => nodeTokens.has(k.toLowerCase()))) { matched.add(comp.name); continue; }
-  }
-
-  return Array.from(matched);
-}
-
-function walkTree(node: LayoutNode, cb: (n: LayoutNode) => void): void {
-  cb(node);
-  if (node.children) {
-    for (const child of node.children) walkTree(child, cb);
-  }
-}
 
 // ======================== 降级 ========================
 
