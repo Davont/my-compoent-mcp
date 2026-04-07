@@ -486,7 +486,8 @@ export const getDesignDataTool: Tool = {
       downloadOnly: {
         type: 'boolean',
         description:
-          '为 true 时仅下载文件到 .octo/，不做后续转换和读取，下载完即结束。默认 false。仅 input 模式生效，file 模式忽略。',
+          '为 true 时仅下载文件到 .octo/，不做后续转换和读取，下载完即结束。默认 true。仅 input 模式生效，file 模式忽略。\n' +
+          '判断规则：仅当用户明确说"转换""生成代码""转代码"时设为 false，其他情况均为 true。',
       },
       overwrite: {
         type: 'boolean',
@@ -495,9 +496,10 @@ export const getDesignDataTool: Tool = {
       projectRoot: {
         type: 'string',
         description:
-          '项目根目录的绝对路径（如 "/home/user/my-project"），设计稿文件将存放在该目录下的 .octo/ 子目录中。必须是绝对路径。',
+          '【必填】当前项目根目录的绝对路径（如 "/home/user/my-project"），设计稿文件将存放在该目录下的 .octo/ 子目录中。必须是绝对路径。请始终传入当前工作区 / 项目的根目录。',
       },
     },
+    required: ['projectRoot'],
   },
 };
 
@@ -514,7 +516,7 @@ export async function handleGetDesignData(
   const rawSaveName = typeof args?.saveName === 'string' ? args.saveName.trim() : undefined;
   const timeout = typeof args?.timeout === 'number' && args.timeout > 0 ? args.timeout : FETCH_TIMEOUT;
   const overwrite = args?.overwrite !== false;
-  const downloadOnly = args?.downloadOnly === true;
+  const downloadOnly = args?.downloadOnly !== false;
   const rawProjectRoot = typeof args?.projectRoot === 'string' ? args.projectRoot.trim() : undefined;
 
   if (rawProjectRoot && !isAbsolute(rawProjectRoot)) {
@@ -643,9 +645,10 @@ export async function handleGetDesignData(
     lines.push(`| 项目 | 值 |`);
     lines.push(`|------|------|`);
     lines.push(`| 来源 | ${fetchResult.sourceDesc} |`);
+    lines.push(`| 保存目录 | \`${resolve(octoDir)}\` |`);
     lines.push(`| 文件数 | ${fetchResult.savedFiles.length} |`);
     lines.push('');
-    lines.push('保存到 .octo/ 的文件：');
+    lines.push('保存的文件：');
     for (const f of fetchResult.savedFiles) {
       lines.push(`- \`${f}\``);
     }
@@ -667,9 +670,9 @@ export async function handleGetDesignData(
     lines.push('| 项目 | 值 |');
     lines.push('|------|------|');
     lines.push(`| 来源 | ${fetchResult.sourceDesc} |`);
-    lines.push(`| 文件 | \`${fetchResult.saveName}.json\` |`);
+    lines.push(`| 保存路径 | \`${resolve(octoDir, fetchResult.saveName + '.json')}\` |`);
     lines.push('');
-    lines.push('> 下载完成。原始 JSON 已保存到 .octo/，未做转换。');
+    lines.push('> 下载完成。原始 JSON 已保存，未做转换。');
     lines.push(`> 如需转换为代码，可调用 \`get_design_data({ file: "${fetchResult.saveName}" })\`。`);
     if (rawProjectRoot) syncOctoDirToSettings(rawProjectRoot);
     return { content: [{ type: 'text', text: lines.join('\n') }] };
