@@ -617,7 +617,7 @@ export async function handleGetDesignData(
         lines.push('');
         lines.push('目录中的文件：');
         for (const f of files) {
-          lines.push(`- \`${f.name}${f.ext}\``);
+          lines.push(`- \`${join(resolve(octoDir), f.name + f.ext)}\``);
         }
       }
       lines.push('');
@@ -636,12 +636,12 @@ export async function handleGetDesignData(
     lines.push(`| 项目 | 值 |`);
     lines.push(`|------|------|`);
     lines.push(`| 来源 | ${fetchResult.sourceDesc} |`);
-    lines.push(`| 保存目录 | \`${resolve(octoDir)}\` |`);
     lines.push(`| 文件数 | ${fetchResult.savedFiles.length} |`);
     lines.push('');
+    const resolvedOctoDir = resolve(octoDir);
     lines.push('保存的文件：');
     for (const f of fetchResult.savedFiles) {
-      lines.push(`- \`${f}\``);
+      lines.push(`- \`${join(resolvedOctoDir, f)}\``);
     }
     lines.push('');
     if (args?.outputMode !== undefined) {
