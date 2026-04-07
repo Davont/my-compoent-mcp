@@ -84,6 +84,29 @@ export async function downloadTransferZip(
 }
 
 /**
+ * 处理包含冒号的文件名
+ */
+function handleColonFileName(fileName: string | Buffer): string {
+  if (Buffer.isBuffer(fileName)) {
+      fileName = fileName.toString('utf-8');
+  }
+
+  // 检查输入是否为字符串
+  if (typeof fileName !== 'string') {
+      return String(fileName) || 'unknown_file';
+  }
+
+  // 如果包含冒号，很可能是时间戳格式如 "19:167299.svg"
+  if (fileName.includes(':')) {
+      // 将冒号替换为下划线（仅在文件名级别）
+      const safeName = fileName.replace(/:/g, '_');
+      return safeName;
+  }
+
+  return fileName;
+}
+
+/**
  * 下载分享口令 ZIP 并直接解压到目标目录。
  * 文件按压缩包内相对路径写入，保持目录结构。
  */
@@ -96,35 +119,88 @@ export async function extractTransferZipToDir(
   const overwrite = options?.overwrite !== false;
 
   const { zip, zipName } = await fetchTransferZipArchive(code, timeout);
-
-  await fsp.mkdir(targetDir, { recursive: true });
-
   const resolvedTargetDir = resolve(targetDir);
   const savedFiles: string[] = [];
   const skippedFiles: string[] = [];
 
-  for (const entry of zip.getEntries()) {
-    const relPath = normalizeZipEntryName(entry.entryName);
-    if (!relPath) continue;
+  // 检查目标目录下是否存在重复的 assets 目录
+  const assetsPath = resolve(targetDir, 'assets');
+  const existingAssetsFiles: string[] = [];
+  if (await pathExists(assetsPath)) {
+    try {
+      const files = await fsp.readdir(assetsPath);
+      existingAssetsFiles.push(...files);
+      throw new Error(`发现现有 assets 目录，包含 ${files.length} 个文件: ${files.join(', ')}`);
+    } catch {
+    
+    }
+  }
+
+  // 异步解压文件（统一处理，避免重复）
+  await Promise.all(Array.from(zip.getEntries()).map(async (entry) => {
+
+    const rawPath = entry.entryName || '';
+    const pathParts = rawPath.split('/');
+    
+    const safePathParts = pathParts.map((part, index) => {
+      if (index === pathParts.length - 1 && !entry.isDirectory) {
+        return handleColonFileName(part);
+      }
+      return part;
+    });
+    
+    const safeEntryName = safePathParts.join('/');
+    
+    // 清理路径中的特殊字符，但保持目录结构
+    const relPath = safeEntryName
+      .replace(/[<>:"|?*]/g, '_')  // 只替换Windows不支持的字符
+      .replace(/_{2,}/g, '_')      // 合并连续的下划线  
+      .replace(/^_+|_+$/g, '');    // 移除开头和结尾的下划线
+    
+    if (!relPath) return; // 跳过无效路径
 
     const targetPath = resolve(targetDir, relPath);
+
     if (!isPathInside(targetPath, resolvedTargetDir)) {
-      throw new Error(`ZIP 路径越界: ${entry.entryName}`);
+      skippedFiles.push(relPath);
+      return;
     }
 
     if (entry.isDirectory) {
       await fsp.mkdir(targetPath, { recursive: true });
-      continue;
+      return;
     }
 
     if (!overwrite && await pathExists(targetPath)) {
       skippedFiles.push(relPath);
-      continue;
+      return;
     }
 
     await fsp.mkdir(dirname(targetPath), { recursive: true });
-    await fsp.writeFile(targetPath, entry.getData());
+
+    const buffer = entry.getData();
+    if (!buffer || buffer.length === 0) {
+      skippedFiles.push(relPath);
+      return;
+    }
+    await fsp.writeFile(targetPath, buffer);
     savedFiles.push(relPath);
+  }));
+
+  // 清理现有的 assets 目录内容（如果存在）
+  if (existingAssetsFiles.length > 0) {
+    try {
+      await Promise.all(existingAssetsFiles.map(async (fileName) => {
+        const filePath = resolve(assetsPath, fileName);
+        try {
+          await fsp.unlink(filePath);
+        } catch (error) {
+          throw new Error(`删除现有文件 ${fileName} 失败:`);
+        }
+      }));
+    } catch (error) {
+      throw new Error(`清理 assets 目录失败:`);
+    }
   }
 
   if (savedFiles.length === 0 && skippedFiles.length === 0) {
