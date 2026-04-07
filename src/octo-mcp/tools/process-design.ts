@@ -469,7 +469,7 @@ export const getDesignDataTool: Tool = {
         type: 'string',
         enum: ['dsl', 'html', 'vue'],
         description:
-          `输出格式。dsl: 精简 JSON；html: HTML + CSS；vue: Vue SFC。默认 ${DEFAULT_OUTPUT_MODE}。`,
+          `输出格式。dsl: 精简 JSON；html: HTML + CSS；vue: Vue SFC。默认 ${DEFAULT_OUTPUT_MODE}。仅 fileKey / file 模式生效，分享口令模式忽略。`,
       },
       nodeId: {
         type: 'string',
@@ -482,6 +482,11 @@ export const getDesignDataTool: Tool = {
       timeout: {
         type: 'number',
         description: `下载超时时间（毫秒），默认 ${FETCH_TIMEOUT}ms。`,
+      },
+      downloadOnly: {
+        type: 'boolean',
+        description:
+          '为 true 时仅下载文件到 .octo/，不做后续转换和读取，下载完即结束。默认 false。仅 input 模式生效，file 模式忽略。',
       },
       overwrite: {
         type: 'boolean',
@@ -509,6 +514,7 @@ export async function handleGetDesignData(
   const rawSaveName = typeof args?.saveName === 'string' ? args.saveName.trim() : undefined;
   const timeout = typeof args?.timeout === 'number' && args.timeout > 0 ? args.timeout : FETCH_TIMEOUT;
   const overwrite = args?.overwrite !== false;
+  const downloadOnly = args?.downloadOnly === true;
   const rawProjectRoot = typeof args?.projectRoot === 'string' ? args.projectRoot.trim() : undefined;
 
   if (rawProjectRoot && !isAbsolute(rawProjectRoot)) {
@@ -644,11 +650,29 @@ export async function handleGetDesignData(
       lines.push(`- \`${f}\``);
     }
     lines.push('');
+    if (args?.outputMode !== undefined) {
+      lines.push('> 注意：分享口令模式下载的是预生成文件，outputMode 参数不生效。\n');
+    }
     lines.push('> 任务完成。文件已就绪，无需进一步操作。');
     if (rawProjectRoot) syncOctoDirToSettings(rawProjectRoot);
     return {
       content: [{ type: 'text', text: lines.join('\n') }],
     };
+  }
+
+  // downloadOnly：仅下载，跳过转换
+  if (downloadOnly) {
+    const lines: string[] = [];
+    lines.push('# 设计稿下载完成\n');
+    lines.push('| 项目 | 值 |');
+    lines.push('|------|------|');
+    lines.push(`| 来源 | ${fetchResult.sourceDesc} |`);
+    lines.push(`| 文件 | \`${fetchResult.saveName}.json\` |`);
+    lines.push('');
+    lines.push('> 下载完成。原始 JSON 已保存到 .octo/，未做转换。');
+    lines.push(`> 如需转换为代码，可调用 \`get_design_data({ file: "${fetchResult.saveName}" })\`。`);
+    if (rawProjectRoot) syncOctoDirToSettings(rawProjectRoot);
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
   }
 
   // .json 文件：走 core.js 转换

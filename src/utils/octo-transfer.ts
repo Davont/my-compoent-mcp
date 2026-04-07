@@ -138,37 +138,79 @@ export async function extractTransferZipToDir(
 
 function httpsGetJson<T>(url: string, timeout: number): Promise<T> {
   return new Promise((resolve, reject) => {
-    const req = https
-      .get(url, { rejectUnauthorized: false }, (res) => {
-        let data = '';
-        res.on('data', (chunk: string) => (data += chunk));
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(data) as T);
-          } catch {
-            reject(new Error(`API 响应不是有效 JSON: ${data.slice(0, 200)}`));
+    let settled = false;
+    const fail = (err: Error) => { if (!settled) { settled = true; reject(err); } };
+
+    let req: ReturnType<typeof https.get>;
+    try {
+      req = https
+        .get(url, { rejectUnauthorized: false }, (res) => {
+          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+            req.destroy();
+            clearTimeout(timer);
+            fail(new Error(`HTTP ${res.statusCode ?? 'unknown'}: ${url}`));
+            return;
           }
-        });
-      })
-      .on('error', reject);
-    req.setTimeout(timeout, () => {
-      req.destroy(new Error(`请求超时（${timeout}ms）`));
-    });
+          let data = '';
+          res.on('data', (chunk: string) => (data += chunk));
+          res.on('end', () => {
+            clearTimeout(timer);
+            if (settled) return;
+            settled = true;
+            try {
+              resolve(JSON.parse(data) as T);
+            } catch {
+              reject(new Error(`API 响应不是有效 JSON: ${data.slice(0, 200)}`));
+            }
+          });
+        })
+        .on('error', (err) => { clearTimeout(timer); fail(err); });
+    } catch (err) {
+      fail(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      req.destroy();
+      fail(new Error(`请求总超时（${timeout}ms）`));
+    }, timeout);
   });
 }
 
 function httpsGetBuffer(url: string, timeout: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const req = https
-      .get(url, { rejectUnauthorized: false }, (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks)));
-      })
-      .on('error', reject);
-    req.setTimeout(timeout, () => {
-      req.destroy(new Error(`请求超时（${timeout}ms）`));
-    });
+    let settled = false;
+    const fail = (err: Error) => { if (!settled) { settled = true; reject(err); } };
+
+    let req: ReturnType<typeof https.get>;
+    try {
+      req = https
+        .get(url, { rejectUnauthorized: false }, (res) => {
+          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+            req.destroy();
+            clearTimeout(timer);
+            fail(new Error(`HTTP ${res.statusCode ?? 'unknown'}: ${url}`));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => {
+            clearTimeout(timer);
+            if (settled) return;
+            settled = true;
+            resolve(Buffer.concat(chunks));
+          });
+        })
+        .on('error', (err) => { clearTimeout(timer); fail(err); });
+    } catch (err) {
+      fail(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      req.destroy();
+      fail(new Error(`请求总超时（${timeout}ms）`));
+    }, timeout);
   });
 }
 
