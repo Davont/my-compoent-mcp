@@ -116,15 +116,6 @@ interface FetchResult {
   savedFiles: string[];
 }
 
-function pickConvertibleFile(files: string[]): string | undefined {
-  if (files.length === 0) return undefined;
-  if (files.includes('index.json')) return 'index.json';
-  if (files.includes('index-px.vue')) return 'index-px.vue';
-  const firstJson = files.find(f => f.endsWith('.json'));
-  if (firstJson) return firstJson;
-  return files.find(f => f.endsWith('.vue'));
-}
-
 async function fetchByShareCode(
   code: string,
   octoDir: string,
@@ -145,37 +136,12 @@ async function fetchByShareCode(
     return { content: [{ type: 'text', text: `分享口令下载失败: ${msg}` }], isError: true };
   }
 
-  const pickFrom = savedFiles.length > 0 ? savedFiles : skippedFiles;
-  const rootConvertibleFiles = pickFrom
-    .filter(f => !f.includes('/'))
-    .filter(f => f.endsWith('.json') || f.endsWith('.vue'));
-  const chosen = pickConvertibleFile(rootConvertibleFiles);
-
-  if (!chosen) {
-    const stateText = savedFiles.length > 0
-      ? '已完成解压'
-      : '压缩包已下载，但未写入新文件';
-    const overwriteText = !overwrite && skippedFiles.length > 0
-      ? '（overwrite=false，已有文件被跳过）'
-      : '';
-    return {
-      content: [{
-        type: 'text',
-        text:
-          `${stateText}${overwriteText}，但未发现根目录可直接转换的 .json/.vue 文件。\n` +
-          `来源: 分享口令 ${code}（原始压缩包: ${zipName}）`,
-      }],
-    };
-  }
-
-  const ext: '.json' | '.vue' = chosen.endsWith('.json') ? '.json' : '.vue';
-  const derivedName = chosen.slice(0, -ext.length);
-
+  // 分享口令下载的是预生成文件，解压成功即完成，不需要检查可转换文件
   return {
-    saveName: derivedName || saveName,
-    ext,
+    saveName,
+    ext: '.vue',
     sourceDesc: `分享口令 ${code}（原始压缩包: ${zipName}）`,
-    savedFiles,
+    savedFiles: savedFiles.length > 0 ? savedFiles : skippedFiles,
   };
 }
 
@@ -633,8 +599,33 @@ export async function handleGetDesignData(
     fetchResult = await fetchByFileKey(input, octoDir, saveName, nodeId, timeout, overwrite);
   }
 
-  // 下载失败或被跳过（已存在且不覆盖），直接返回
+  // 下载失败或无可转换文件
   if ('content' in fetchResult) {
+    // 真正的错误直接返回
+    if (fetchResult.isError) return fetchResult;
+
+    // downloadOnly：下载已完成，即使没有可转换文件也算成功
+    if (downloadOnly) {
+      const files = listOctoFiles(octoDir);
+      const lines: string[] = [];
+      lines.push('# 设计稿下载完成\n');
+      lines.push(`| 项目 | 值 |`);
+      lines.push(`|------|------|`);
+      lines.push(`| 保存目录 | \`${resolve(octoDir)}\` |`);
+      lines.push(`| 文件数 | ${files.length} |`);
+      if (files.length > 0) {
+        lines.push('');
+        lines.push('目录中的文件：');
+        for (const f of files) {
+          lines.push(`- \`${f.name}${f.ext}\``);
+        }
+      }
+      lines.push('');
+      lines.push('> 下载完成，任务结束。');
+      if (rawProjectRoot) syncOctoDirToSettings(rawProjectRoot);
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    }
+
     return fetchResult;
   }
 
