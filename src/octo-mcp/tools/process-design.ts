@@ -111,7 +111,8 @@ function syncOctoDirToSettings(projectRoot: string): void {
 
 interface FetchResult {
   saveName: string;
-  ext: string;
+  /** 主文件扩展名，仅 fileKey 模式使用 */
+  ext?: string;
   sourceDesc: string;
   savedFiles: string[];
 }
@@ -139,7 +140,6 @@ async function fetchByShareCode(
   // 分享口令下载的是预生成文件，解压成功即完成，不需要检查可转换文件
   return {
     saveName,
-    ext: '.vue',
     sourceDesc: `分享口令 ${code}（原始压缩包: ${zipName}）`,
     savedFiles: savedFiles.length > 0 ? savedFiles : skippedFiles,
   };
