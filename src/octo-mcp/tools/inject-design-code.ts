@@ -14,7 +14,7 @@ import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, basename } from 'node:path';
 import { promises as fsp } from 'node:fs';
 import AdmZip from 'adm-zip';
-import { httpsGetBuffer, isPathInside, pathExists } from '../utils/octo-transfer.js';
+import { httpsGetBuffer, isPathInside, pathExists } from '../../utils/octo-transfer.js';
 
 /** 鸿蒙项目中的目标目录 */
 const PAGES_REL = 'entry/src/main/ets/pages';
@@ -74,7 +74,7 @@ export async function handleInjectDesignCode(
   const entries = zip.getEntries();
 
   // ===== 2. 检测是否鸿蒙 ZIP（根目录或一层包裹下有 .ets 文件） =====
-  const { indexEntry, basePrefix, assetEntries } = parseHarmonyZip(entries);
+  const { indexEntry, assetEntries } = parseHarmonyZip(entries);
 
   if (!indexEntry) {
     return fail('ZIP 包中未找到 index.ets，不是鸿蒙设计包');
@@ -163,7 +163,6 @@ interface HarmonyZipInfo {
 function parseHarmonyZip(entries: AdmZip.IZipEntry[]): HarmonyZipInfo {
   const nil: HarmonyZipInfo = { indexEntry: null, basePrefix: '', assetEntries: [] };
 
-  // 在根目录或一层包裹下找 index.ets
   let indexEntry: AdmZip.IZipEntry | null = null;
   let basePrefix = '';
 
@@ -182,7 +181,6 @@ function parseHarmonyZip(entries: AdmZip.IZipEntry[]): HarmonyZipInfo {
 
   if (!indexEntry) return nil;
 
-  // 收集 assets/ 下的文件
   const assetsPrefix = basePrefix + 'assets/';
   const assetEntries = entries.filter(e => {
     if (e.isDirectory) return false;

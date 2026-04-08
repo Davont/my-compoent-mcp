@@ -15,7 +15,6 @@ import { changelogQueryTool, handleChangelogQuery } from './changelog-query.js';
 import { sourceInspectTool, handleSourceInspect } from './source-inspect.js';
 import { designToCodeTool, handleDesignToCode } from './design-to-code.js';
 import { fetchDesignDataTool, handleFetchDesignData } from './fetch-design-data.js';
-import { injectDesignCodeTool, handleInjectDesignCode } from './inject-design-code.js';
 
 // 内部保留（不对外注册，供内部编排复用）
 import { handleComponentList } from './component-list.js';
@@ -32,7 +31,6 @@ import { handleGetFunctionCode } from './get-function-code.js';
 export const tools: Tool[] = [
   designToCodeTool,
   fetchDesignDataTool,
-  injectDesignCodeTool,
   getContextBundleTool,
   componentSearchTool,
   componentDetailsTool,
@@ -55,7 +53,6 @@ export const toolHandlers: Record<
   [changelogQueryTool.name]: handleChangelogQuery,
   [sourceInspectTool.name]: handleSourceInspect,
   [fetchDesignDataTool.name]: handleFetchDesignData,
-  [injectDesignCodeTool.name]: handleInjectDesignCode,
   [designToCodeTool.name]: handleDesignToCode,
 };
 
@@ -63,8 +60,6 @@ export const toolHandlers: Record<
 export {
   fetchDesignDataTool,
   handleFetchDesignData,
-  injectDesignCodeTool,
-  handleInjectDesignCode,
   getContextBundleTool,
   handleGetContextBundle,
   componentSearchTool,
