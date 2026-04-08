@@ -253,7 +253,7 @@ function httpsGetJson<T>(url: string, timeout: number): Promise<T> {
   });
 }
 
-function httpsGetBuffer(url: string, timeout: number): Promise<Buffer> {
+export function httpsGetBuffer(url: string, timeout: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const fail = (err: Error) => { if (!settled) { settled = true; reject(err); } };
@@ -331,11 +331,11 @@ function normalizeZipEntryName(name: string): string {
   return name.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
 }
 
-function isPathInside(targetPath: string, parentPath: string): boolean {
+export function isPathInside(targetPath: string, parentPath: string): boolean {
   return targetPath === parentPath || targetPath.startsWith(parentPath + sep);
 }
 
-async function pathExists(targetPath: string): Promise<boolean> {
+export async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await fsp.access(targetPath);
     return true;
