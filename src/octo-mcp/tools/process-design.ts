@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'fs
 import { isAbsolute, join, resolve, sep } from 'path';
 import { designToCode } from '../../octo/core.js';
 import { decodeSharePassword, extractTransferZipToDir } from '../../utils/octo-transfer.js';
+import { tryInjectHarmonyFiles } from '../../utils/harmony-inject.js';
 import { listOctoFiles, type OctoFileInfo } from '../../utils/octo-files.js';
 import {
   ENV_OCTO_DIR,
@@ -631,6 +632,14 @@ export async function handleGetDesignData(
 
   // shareCode 下载的是预生成文件，不需要转换，直接返回下载结果
   if (isShareMode) {
+    // 尝试鸿蒙项目注入（ZIP 含 .ets 文件时自动触发）
+    let harmonyResult: Awaited<ReturnType<typeof tryInjectHarmonyFiles>> = null;
+    if (rawProjectRoot) {
+      try {
+        harmonyResult = await tryInjectHarmonyFiles(octoDir, rawProjectRoot, fetchResult.savedFiles);
+      } catch { /* 注入失败不影响主流程 */ }
+    }
+
     const lines: string[] = [];
     lines.push('# 设计稿下载完成（分享口令模式）\n');
     lines.push(`| 项目 | 值 |`);
@@ -643,6 +652,19 @@ export async function handleGetDesignData(
     for (const f of fetchResult.savedFiles) {
       lines.push(`- \`${join(resolvedOctoDir, f)}\``);
     }
+
+    if (harmonyResult) {
+      lines.push('');
+      lines.push('## 鸿蒙项目注入\n');
+      lines.push(harmonyResult.message);
+      if (harmonyResult.success && harmonyResult.written.length > 0) {
+        lines.push('');
+        for (const f of harmonyResult.written) {
+          lines.push(`- \`${f}\``);
+        }
+      }
+    }
+
     lines.push('');
     if (args?.outputMode !== undefined) {
       lines.push('> 注意：分享口令模式下载的是预生成文件，outputMode 参数不生效。\n');
