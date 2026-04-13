@@ -137,9 +137,10 @@ async function detectYolo(imageBase64: string): Promise<any> {
 export const generateArkuiTool: Tool = {
   name: 'generate_arkui_dsl',
   description:
-    '从本地设计稿 JSON（+ 可选截图）生成 ArkUI DSL JSON 并保存到 .octo/ 目录。\n\n' +
-    '完整流程：读取图片 → base64 → YOLO 检测 → 设计稿 JSON + YOLO 结果 → 布局引擎 → ArkUI DSL\n' +
-    '不提供 image 时跳过 YOLO 检测，仅用设计稿 JSON 生成（精度略低但仍可用）。',
+    '当用户要求将设计稿转换为 ArkUI DSL、生成 ArkUI、生成鸿蒙代码时，必须调用此工具。\n' +
+    '不要自己读取设计稿 JSON 或截图文件，直接把文件路径传给此工具即可。\n\n' +
+    '此工具内部完成全部处理：读取文件 → 图片转 base64 → YOLO 检测 → 布局引擎 → 生成 ArkUI DSL JSON → 保存到 .octo/ 目录。\n' +
+    '不提供 image 时跳过 YOLO 检测，仅用设计稿 JSON 生成。',
   inputSchema: {
     type: 'object',
     properties: {

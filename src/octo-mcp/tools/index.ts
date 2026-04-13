@@ -11,6 +11,3 @@ export const toolHandlers: Record<
   [getDesignDataTool.name]: handleGetDesignData,
   [generateArkuiTool.name]: handleGenerateArkui,
 };
-
-export { getDesignDataTool, handleGetDesignData };
-export { generateArkuiTool, handleGenerateArkui };
