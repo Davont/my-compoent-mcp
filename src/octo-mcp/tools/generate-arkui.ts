@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { basename, extname, isAbsolute, join, resolve } from 'path';
 import { octoToArkUiDsl } from '../../../public/core.js';
 
-const YOLO_DETECT_URL = 'https://octo-beta.hdesign.huawei.com/uidetect/detect';
+const YOLO_DETECT_URL = 'https://harmony-agent.his-beta.huawei.com/CodeGenieInternalService/api/v1/detect';
 const YOLO_TIMEOUT = 60_000;
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp']);
 
@@ -36,78 +36,7 @@ function resolvePath(root: string, p: string): string {
 
 // ======================== YOLO 检测 ========================
 
-/** 判断是否为简化格式 { components: [...] } */
-function isSimpleYoloFormat(data: unknown): boolean {
-  return !!data && typeof data === 'object' && Array.isArray((data as any).components);
-}
-
-/** 简化格式 → 标准 YoloResult（自动推断父子关系和层级） */
-function adaptSimpleYolo(data: any): any {
-  const comps: any[] = data.components;
-  const inferW = Math.ceil(Math.max(...comps.map((c: any) => c.bbox.x2)) * 1.02);
-  const inferH = Math.ceil(Math.max(...comps.map((c: any) => c.bbox.y2)) * 1.02);
-
-  const area = (c: any) => (c.bbox.x2 - c.bbox.x1) * (c.bbox.y2 - c.bbox.y1);
-  const contains = (a: any, b: any) =>
-    a.bbox.x1 <= b.bbox.x1 && a.bbox.y1 <= b.bbox.y1 &&
-    a.bbox.x2 >= b.bbox.x2 && a.bbox.y2 >= b.bbox.y2 && a !== b;
-
-  const sorted = [...comps].sort((a, b) => area(b) - area(a));
-  const parentMap = new Map<number, number>();
-  const childrenMap = new Map<number, number[]>();
-
-  for (let i = 0; i < sorted.length; i++) {
-    parentMap.set(i, -1);
-    childrenMap.set(i, []);
-  }
-  for (let i = 0; i < sorted.length; i++) {
-    for (let j = i - 1; j >= 0; j--) {
-      if (contains(sorted[j], sorted[i])) {
-        const cur = parentMap.get(i)!;
-        if (cur === -1 || area(sorted[j]) < area(sorted[cur])) {
-          parentMap.set(i, j);
-        }
-      }
-    }
-  }
-  for (let i = 0; i < sorted.length; i++) {
-    const p = parentMap.get(i)!;
-    if (p !== -1) childrenMap.get(p)!.push(i);
-  }
-
-  const depthMap = new Map<number, number>();
-  function calcDepth(idx: number): number {
-    if (depthMap.has(idx)) return depthMap.get(idx)!;
-    const p = parentMap.get(idx)!;
-    const d = p === -1 ? 0 : calcDepth(p) + 1;
-    depthMap.set(idx, d);
-    return d;
-  }
-  for (let i = 0; i < sorted.length; i++) calcDepth(i);
-
-  return {
-    result1: {
-      json: {
-        imageWidth: inferW,
-        imageHeight: inferH,
-        predictions: sorted.map((comp: any, idx: number) => ({
-          box: [comp.bbox.x1, comp.bbox.y1, comp.bbox.x2, comp.bbox.y2],
-          box_id: idx,
-          label: comp.class,
-          score: comp.confidence,
-          layer_level: depthMap.get(idx) ?? 0,
-          parent: parentMap.get(idx) ?? -1,
-          children: childrenMap.get(idx) ?? [],
-          max_iou: 0,
-          max_iou_id: -1,
-          scrollable: false,
-        })),
-      },
-    },
-  };
-}
-
-/** 调用 YOLO 检测 API，失败返回 null（不中断流程） */
+/** 调用 YOLO 检测 API，统一归一化为 { result1: { json: { predictions, imageWidth, imageHeight } } } */
 async function detectYolo(imageBase64: string): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), YOLO_TIMEOUT);
@@ -116,17 +45,22 @@ async function detectYolo(imageBase64: string): Promise<any> {
     const resp = await fetch(YOLO_DETECT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: imageBase64 }),
+      body: JSON.stringify({ imageBase64 }),
       signal: controller.signal,
     });
     if (!resp.ok) {
       throw new Error(`YOLO API 返回 ${resp.status} ${resp.statusText}`);
     }
 
-    let data = await resp.json();
-    if (isSimpleYoloFormat(data)) return adaptSimpleYolo(data);
-    if (data.result?.result1 && !data.result1) data = data.result;
-    return data;
+    const body = await resp.json();
+    if (body?.code !== 200) {
+      throw new Error(`YOLO API 业务错误 code=${body?.code} message=${body?.message ?? ''}`);
+    }
+    const json = body?.data?.result?.json;
+    if (!json || !Array.isArray(json.predictions)) {
+      throw new Error('YOLO API 响应缺少 data.result.json.predictions');
+    }
+    return { result1: { json } };
   } finally {
     clearTimeout(timer);
   }
