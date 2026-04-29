@@ -45,7 +45,7 @@ async function detectYolo(imageBase64: string): Promise<any> {
     const resp = await fetch(YOLO_DETECT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64 }),
+      body: JSON.stringify({ image_base64: imageBase64 }),
       signal: controller.signal,
     });
     if (!resp.ok) {
