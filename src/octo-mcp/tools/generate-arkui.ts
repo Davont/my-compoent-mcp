@@ -11,7 +11,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { basename, extname, isAbsolute, join, resolve } from 'path';
 import { octoToArkUiDsl } from '../../../public/core.js';
 
-const YOLO_DETECT_URL = 'https://harmony-agent.his-beta.huawei.com/CodeGenieInternalService/api/v1/detect';
+// YOLO 检测接口：普通设备与手表分别走不同端点
+const YOLO_DETECT_URL_NORMAL = 'https://harmony-agent.his-beta.huawei.com/CodeGenieInternalService/api/v1/detect';
+const YOLO_DETECT_URL_WATCH = 'https://harmony-agent.his-beta.huawei.com/CodeGenieInternalService/api/v1/detect/watch';
 const YOLO_TIMEOUT = 60_000;
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp']);
 
@@ -37,12 +39,13 @@ function resolvePath(root: string, p: string): string {
 // ======================== YOLO 检测 ========================
 
 /** 调用 YOLO 检测 API，统一归一化为 { result1: { json: { predictions, imageWidth, imageHeight } } } */
-async function detectYolo(imageBase64: string): Promise<any> {
+async function detectYolo(imageBase64: string, isWatch: boolean): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), YOLO_TIMEOUT);
+  const url = isWatch ? YOLO_DETECT_URL_WATCH : YOLO_DETECT_URL_NORMAL;
 
   try {
-    const resp = await fetch(YOLO_DETECT_URL, {
+    const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image_base64: imageBase64 }),
@@ -92,6 +95,10 @@ export const generateArkuiTool: Tool = {
         type: 'string',
         description: '截图文件路径（相对 projectRoot 或绝对路径）。提供时调用 YOLO 检测增强识别精度，不提供则跳过。',
       },
+      isWatchDesign: {
+        type: 'boolean',
+        description: '是否为手表设计稿。true 时 YOLO 走手表专用端点 /detect/watch；默认 false 走普通端点 /detect。仅在提供 image 时生效。',
+      },
       pageName: {
         type: 'string',
         description: '页面名称，默认 "Page"',
@@ -115,6 +122,7 @@ export async function handleGenerateArkui(
   const imagePath = typeof args.image === 'string' ? args.image.trim() : '';
   const pageName = typeof args.pageName === 'string' ? args.pageName.trim() : 'Page';
   const rawSaveName = typeof args.saveName === 'string' ? args.saveName.trim() : '';
+  const isWatchDesign = args.isWatchDesign === true;
 
   if (!projectRoot || !isAbsolute(projectRoot)) {
     return { content: [{ type: 'text', text: 'projectRoot 必须是非空绝对路径。' }], isError: true };
@@ -156,9 +164,9 @@ export async function handleGenerateArkui(
 
     try {
       const base64 = readImageAsBase64(imgFullPath);
-      yoloData = await detectYolo(base64);
+      yoloData = await detectYolo(base64, isWatchDesign);
       const predCount = yoloData?.result1?.json?.predictions?.length ?? 0;
-      yoloInfo = `检测到 ${predCount} 个组件`;
+      yoloInfo = `检测到 ${predCount} 个组件（${isWatchDesign ? '手表' : '普通'}端点）`;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       yoloInfo = `检测失败（${msg}），回退为纯设计稿模式`;
